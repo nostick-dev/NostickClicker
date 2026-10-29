@@ -1,117 +1,88 @@
-name: FixInvuln Build & Release
+name: Build APK from ZIP
 
+# تشغيل يدوي فقط من تبويب Actions
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
 
-permissions:
-  contents: write
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
 jobs:
-  build:
+  build-apk:
+    name: Unzip project and build APK
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract ZIP and locate pom.xml
-        id: project
+      - name: Find and unzip Android project
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP_FILE="FixInvuln-source.zip"
+          ZIP_FILE="$(find . -maxdepth 3 -type f -iname '*.zip' -print -quit)"
 
-          if [ ! -f "$ZIP_FILE" ]; then
-            echo "ERROR: ZIP file not found: $ZIP_FILE"
-            echo "Files in repository:"
-            find . -maxdepth 3 -type f
+          if [ -z "${ZIP_FILE}" ]; then
+            echo "لم يتم العثور على ملف ZIP داخل المستودع."
+            echo "ارفع NostickClicker-ready.zip إلى المستودع أولًا."
             exit 1
           fi
 
-          mkdir -p extracted
-          unzip -o "$ZIP_FILE" -d extracted
+          echo "ZIP found: ${ZIP_FILE}"
+          rm -rf extracted-project
+          mkdir -p extracted-project
+          unzip -q "${ZIP_FILE}" -d extracted-project
 
-          POM_FILE="$(find extracted -type f -name pom.xml -print -quit)"
+          PROJECT_DIR="$(find extracted-project -type f \( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print -quit | xargs -r dirname)"
 
-          if [ -z "$POM_FILE" ]; then
-            echo "ERROR: pom.xml was not found inside the ZIP."
-            find extracted -maxdepth 4 -type f
+          if [ -z "${PROJECT_DIR}" ]; then
+            echo "لم يتم العثور على build.gradle داخل ملف ZIP."
+            find extracted-project -maxdepth 5 -type f | sort
             exit 1
           fi
 
-          PROJECT_DIR="$(dirname "$POM_FILE")"
+          echo "Android project directory: ${PROJECT_DIR}"
+          echo "PROJECT_DIR=${PROJECT_DIR}" >> "$GITHUB_ENV"
 
-          echo "Found Maven project: $PROJECT_DIR"
-          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Java 21
-        uses: actions/setup-java@v5
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "21"
+          java-version: '17'
 
-      - name: Build plugin with Maven
-        shell: bash
-        env:
-          PROJECT_DIR: ${{ steps.project.outputs.project_dir }}
-        run: |
-          set -euo pipefail
-          mvn -B -f "$PROJECT_DIR/pom.xml" clean package
-
-      - name: Collect JAR files
-        shell: bash
-        env:
-          PROJECT_DIR: ${{ steps.project.outputs.project_dir }}
-        run: |
-          set -euo pipefail
-
-          mkdir -p release-files
-
-          find "$PROJECT_DIR/target" \
-            -maxdepth 1 \
-            -type f \
-            -name '*.jar' \
-            ! -name '*-sources.jar' \
-            ! -name '*-javadoc.jar' \
-            -exec cp {} release-files/ \;
-
-          if ! find release-files -maxdepth 1 -name '*.jar' -print -quit | grep -q .; then
-            echo "ERROR: No JAR files were built."
-            echo "Target directory contents:"
-            find "$PROJECT_DIR/target" -maxdepth 2 -type f || true
-            exit 1
-          fi
-
-          ls -lh release-files
-
-      - name: Set release tag
-        id: release
-        shell: bash
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            TAG="${GITHUB_REF#refs/tags/}"
-          else
-            TAG="build-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          fi
-
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Release tag: $TAG"
-
-      - name: Create GitHub Release and upload JAR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ steps.release.outputs.tag }}
+      - name: Prepare preinstalled Android SDK
         shell: bash
         run: |
           set -euo pipefail
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/cmdline-tools/16.0/bin:$ANDROID_HOME/platform-tools:$PATH"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/cmdline-tools/16.0/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;35.0.0"
 
-          gh release create "$TAG" release-files/*.jar \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "FixInvuln $TAG" \
-            --notes "Automated Maven build of FixInvuln." \
-            --target "$GITHUB_SHA"
-            
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: NostickClicker-debug-apk
+          path: extracted-project/**/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+          
