@@ -1,104 +1,227 @@
-name: Build APK from ZIP
+name: Build & Release NostickClicker
 
-# تشغيل يدوي فقط من تبويب Actions
+# ─────────────────────────────────────────────────────────────
+# التشغيل:
+#  1) push tag مثل v2.0.0      → يبني وينشر Release تلقائيًا
+#  2) يدويًا من Actions         → اختر tag وهل هو prerelease
+#
+# المخرجات في الـ Release:
+#  • NostickClicker-<ver>-release.apk   (موقّع، للنشر)
+#  • NostickClicker-<ver>-debug.apk     (للتجربة)
+#  • NostickClicker-<ver>-release.aab   (لـ Google Play، فقط مع مفتاح حقيقي)
+#  • SHA256SUMS.txt
+#
+# Secrets (اختيارية لكن مهمة): Settings → Secrets and variables → Actions
+#  KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
+# بدونها يُوقَّع الـ APK بمفتاح مؤقت (للتجربة فقط، لا يصلح للمتجر).
+# ─────────────────────────────────────────────────────────────
+
 on:
+  push:
+    tags: [ 'v*' ]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (مثال: v2.0.0)'
+        required: true
+        default: 'v2.0.0'
+      prerelease:
+        description: 'نشر كـ pre-release'
+        type: boolean
+        default: false
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   ANDROID_HOME: /usr/local/lib/android/sdk
   ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+  BUILD_TOOLS: 35.0.0
+  APP_NAME: NostickClicker
 
 jobs:
-  build-apk:
-    name: Unzip project and build APK
+  build:
+    name: Build APK / AAB and publish Release
     runs-on: ubuntu-latest
-
+    timeout-minutes: 40
     permissions:
-      contents: read
+      contents: write
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v5
 
-      - name: Find and unzip Android project
+      # ── 1. تحديد مجلد المشروع (جذر المستودع أو داخل أحدث ZIP) ──
+      - name: Locate Android project
         shell: bash
         run: |
           set -euo pipefail
-
-          ZIP_FILE="$(find . -maxdepth 3 -type f -iname '*.zip' -print -quit)"
-
-          if [ -z "${ZIP_FILE}" ]; then
-            echo "لم يتم العثور على ملف ZIP داخل المستودع."
-            echo "ارفع NostickClicker-ready.zip إلى المستودع أولًا."
-            exit 1
+          if [ -f settings.gradle ] || [ -f settings.gradle.kts ]; then
+            PROJECT_DIR="."
+          else
+            ZIP_FILE="$(find . -maxdepth 3 -type f -iname '*.zip' -not -path './extracted-project/*' -printf '%T@ %p\n' | sort -nr | head -n1 | cut -d' ' -f2-)"
+            if [ -z "${ZIP_FILE}" ]; then
+              echo "::error::لا يوجد settings.gradle في الجذر ولا ملف ZIP للمشروع."
+              exit 1
+            fi
+            echo "Using ZIP: ${ZIP_FILE}"
+            rm -rf extracted-project && mkdir extracted-project
+            unzip -q "${ZIP_FILE}" -d extracted-project
+            PROJECT_DIR="$(find extracted-project -type f \( -name 'settings.gradle' -o -name 'settings.gradle.kts' \) -print -quit | xargs -r dirname)"
+            if [ -z "${PROJECT_DIR}" ]; then
+              echo "::error::لم يُعثر على settings.gradle داخل ZIP."
+              find extracted-project -maxdepth 4 | sort
+              exit 1
+            fi
           fi
-
-          echo "ZIP found: ${ZIP_FILE}"
-          rm -rf extracted-project
-          mkdir -p extracted-project
-          unzip -q "${ZIP_FILE}" -d extracted-project
-
-          PROJECT_DIR="$(find extracted-project -type f \( -name 'build.gradle' -o -name 'build.gradle.kts' \) -print -quit | xargs -r dirname)"
-
-          if [ -z "${PROJECT_DIR}" ]; then
-            echo "لم يتم العثور على build.gradle داخل ملف ZIP."
-            find extracted-project -maxdepth 5 -type f | sort
-            exit 1
-          fi
-
-          echo "Android project directory: ${PROJECT_DIR}"
           echo "PROJECT_DIR=${PROJECT_DIR}" >> "$GITHUB_ENV"
+          echo "Project dir: ${PROJECT_DIR}"
+
+      # ── 2. تحديد النسخة والـ tag ──
+      - name: Resolve version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+            PRE="${{ inputs.prerelease }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+            PRE="false"
+          fi
+          VERSION="${TAG#v}"
+          case "${TAG}" in *-*) PRE="true" ;; esac   # v2.0.0-beta → prerelease
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "PRERELEASE=${PRE}" >> "$GITHUB_ENV"
+          echo "Tag=${TAG} Version=${VERSION} Prerelease=${PRE}"
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Prepare preinstalled Android SDK
+      - name: Prepare Android SDK
         shell: bash
         run: |
           set -euo pipefail
-          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/cmdline-tools/16.0/bin:$ANDROID_HOME/platform-tools:$PATH"
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "$ANDROID_HOME/cmdline-tools/16.0/bin" >> "$GITHUB_PATH"
-          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/cmdline-tools/16.0/bin:$PATH"
           yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;${BUILD_TOOLS}"
 
-      - name: Set up Gradle 8.7
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
-      - name: Build debug APK
+      # ── 3. البناء ──
+      - name: Build debug + release APK and release AAB
         shell: bash
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
-          gradle --no-daemon --stacktrace assembleDebug
+          gradle --no-daemon --stacktrace assembleDebug assembleRelease bundleRelease
 
-      - name: Locate APK output
+      # ── 4. التوقيع ──
+      - name: Prepare keystore
         shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          APK_FILE="$(find "$PROJECT_DIR" -type f -path '*/build/outputs/apk/*/*.apk' -print -quit)"
-
-          if [ -z "${APK_FILE}" ]; then
-            echo "لم يتم العثور على APK بعد نجاح البناء."
-            find "$PROJECT_DIR" -type f | grep -E '\.apk$|build/outputs' || true
-            exit 1
+          if [ -n "${KEYSTORE_BASE64}" ] && [ -n "${KEYSTORE_PASSWORD}" ] && [ -n "${KEY_ALIAS}" ]; then
+            echo "${KEYSTORE_BASE64}" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "REAL_KEY=true" >> "$GITHUB_ENV"
+            echo "KS_ALIAS=${KEY_ALIAS}" >> "$GITHUB_ENV"
+            echo "::add-mask::${KEYSTORE_PASSWORD}"
+          else
+            echo "::warning::لا توجد Secrets للتوقيع — يُستخدم مفتاح مؤقت (للتجربة فقط). لن يُنشر AAB."
+            keytool -genkeypair -v -keystore "$RUNNER_TEMP/release.jks" \
+              -alias temp -keyalg RSA -keysize 2048 -validity 3650 \
+              -storepass temp1234 -keypass temp1234 \
+              -dname "CN=NostickClicker Test, O=Nostick, C=IQ" > /dev/null
+            echo "REAL_KEY=false" >> "$GITHUB_ENV"
+            echo "KS_ALIAS=temp" >> "$GITHUB_ENV"
           fi
 
-          echo "APK found: ${APK_FILE}"
-          mkdir -p apk-output
-          cp "${APK_FILE}" apk-output/NostickClicker-debug.apk
+      - name: Sign and collect artifacts
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/${BUILD_TOOLS}"
+          mkdir -p dist
 
-      - name: Upload APK
+          if [ "${REAL_KEY}" = "true" ]; then
+            export KS_PASS="${KEYSTORE_PASSWORD}"
+            export KEY_PASS="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+          else
+            export KS_PASS="temp1234"
+            export KEY_PASS="temp1234"
+          fi
+
+          # Release APK
+          UNSIGNED="$(find "$PROJECT_DIR" -type f -path '*/outputs/apk/release/*.apk' -print -quit)"
+          [ -n "${UNSIGNED}" ] || { echo "::error::Release APK not found"; exit 1; }
+          "$BT/zipalign" -p -f 4 "${UNSIGNED}" "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "${KS_ALIAS}" \
+            --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
+            --out "dist/${APP_NAME}-${VERSION}-release.apk" "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" verify --verbose "dist/${APP_NAME}-${VERSION}-release.apk"
+
+          # Debug APK
+          DEBUG="$(find "$PROJECT_DIR" -type f -path '*/outputs/apk/debug/*.apk' -print -quit)"
+          [ -n "${DEBUG}" ] || { echo "::error::Debug APK not found"; exit 1; }
+          cp "${DEBUG}" "dist/${APP_NAME}-${VERSION}-debug.apk"
+
+          # AAB (فقط مع مفتاح حقيقي)
+          if [ "${REAL_KEY}" = "true" ]; then
+            AAB="$(find "$PROJECT_DIR" -type f -path '*/outputs/bundle/release/*.aab' -print -quit)"
+            [ -n "${AAB}" ] || { echo "::error::AAB not found"; exit 1; }
+            cp "${AAB}" "dist/${APP_NAME}-${VERSION}-release.aab"
+            jarsigner -keystore "$RUNNER_TEMP/release.jks" \
+              -storepass:env KS_PASS -keypass:env KEY_PASS \
+              "dist/${APP_NAME}-${VERSION}-release.aab" "${KS_ALIAS}" > /dev/null
+          fi
+
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          ls -la dist
+          cat dist/SHA256SUMS.txt
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: NostickClicker-debug-apk
-          path: apk-output/NostickClicker-debug.apk
+          name: ${{ env.APP_NAME }}-${{ env.VERSION }}
+          path: dist/*
           if-no-files-found: error
-          retention-days: 14
-          
+          retention-days: 30
+
+      # ── 5. النشر ──
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: ${{ env.APP_NAME }} ${{ env.VERSION }}
+          prerelease: ${{ env.PRERELEASE == 'true' }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: dist/*
+          body: |
+            ### ${{ env.APP_NAME }} ${{ env.VERSION }}
+
+            | الملف | الاستخدام |
+            |---|---|
+            | `*-release.apk` | التثبيت المباشر على الجهاز |
+            | `*-debug.apk` | للتجربة والتشخيص |
+            | `*-release.aab` | رفع Google Play (إن وُجد) |
+            | `SHA256SUMS.txt` | التحقق من سلامة الملفات |
+
+            > يحتاج Android 8.0+ — تفعيل خدمة إمكانية الوصول والظهور فوق التطبيقات.
+            
