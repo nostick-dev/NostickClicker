@@ -1,0 +1,281 @@
+name: Build NostickClicker
+
+# ─────────────────────────────────────────────────────────────────────────────
+# طريقة العمل
+#  1) ارفع إلى جذر المستودع ملف zip اسمه يبدأ بـ NostickClicker
+#     (مثال: NostickClicker-v1.0.1.zip)
+#  2) الـ workflow:
+#       • يفك الـ zip ويُخرج الملفات من المجلد الداخلي (NostickClicker-v1.0.1/)
+#       • يحذف كل الملفات القديمة في المستودع ويبقي .github و .git فقط
+#       • يحذف الـ zip والمجلد، ويُرسل (commit) ملفات السورس الجديدة إلى الريبو
+#       • يبني التطبيق وينشر Release (tag = v + versionName)
+#  3) أي push عادي بدون zip: يبني الملفات الموجودة في الريبو مباشرة.
+#
+#  ملاحظة: لا يمكن لـ GitHub Actions تعديل ملفات .github/workflows بنفسه،
+#  لذلك يتجاهل الـ workflow مجلد .github الموجود داخل الـ zip ويُبقي هذا الملف كما هو.
+#
+# Secrets اختيارية للتوقيع (Settings → Secrets and variables → Actions):
+#   KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
+# بدونها يُوقَّع الـ APK بمفتاح مؤقت (للتجربة فقط) ولا يُنشر AAB.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [ '**' ]
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'انشر Release حتى بدون zip جديد'
+        type: boolean
+        default: false
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+  BUILD_TOOLS: 35.0.0
+  APP_NAME: NostickClicker
+
+jobs:
+  build:
+    name: Import ZIP (if any) → Build → Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # ── 1. استيراد الـ zip (إن وُجد) ─────────────────────────────────────────
+      - name: Import source from NostickClicker*.zip
+        id: import
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t ZIPS < <(find . -maxdepth 1 -type f -iname 'NostickClicker*.zip' -printf '%f\n' | sort -V)
+          if [ "${#ZIPS[@]}" -eq 0 ]; then
+            echo "imported=false" >> "$GITHUB_OUTPUT"
+            echo "لا يوجد NostickClicker*.zip في جذر المستودع — سيتم بناء الملفات الموجودة."
+            exit 0
+          fi
+
+          ZIP="${ZIPS[-1]}"   # أعلى رقم إصدار
+          echo "ZIP: ${ZIP}   (عدد ملفات zip الموجودة: ${#ZIPS[@]})"
+
+          # فك الضغط في مجلد مؤقت خارج المستودع أولًا (للتحقق قبل حذف أي شيء)
+          WORK="$RUNNER_TEMP/zipwork"
+          rm -rf "$WORK" && mkdir -p "$WORK"
+          unzip -q -o "$ZIP" -d "$WORK"
+          rm -rf "$WORK/__MACOSX"
+          find "$WORK" -name '.DS_Store' -delete
+
+          # إزالة المجلد الغلاف (NostickClicker-v1.0.1/) حتى نصل لجذر المشروع
+          is_root() { [ -f "$1/settings.gradle" ] || [ -f "$1/settings.gradle.kts" ]; }
+          SRC="$WORK"
+          while ! is_root "$SRC"; do
+            n="$(find "$SRC" -mindepth 1 -maxdepth 1 | wc -l)"
+            [ "$n" -eq 1 ] && [ -d "$(find "$SRC" -mindepth 1 -maxdepth 1)" ] || break
+            SRC="$(find "$SRC" -mindepth 1 -maxdepth 1)"
+          done
+
+          if ! is_root "$SRC"; then
+            echo "::error::لم أجد settings.gradle داخل ${ZIP}. لم يتم تغيير أي شيء في المستودع."
+            find "$WORK" -maxdepth 3 | head -60
+            exit 1
+          fi
+
+          # لا نلمس .github أبدًا (GitHub يمنع تعديل ملفات workflows بواسطة الـ Actions)
+          rm -rf "$SRC/.github" "$SRC/.git"
+
+          # حذف كل شيء قديم في المستودع ما عدا .git و .github (يشمل الـ zip نفسه)
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' ! -name '.github' -exec rm -rf {} +
+
+          # نسخ ملفات المشروع الجديدة إلى الجذر (تشمل الملفات المخفية)
+          cp -a "$SRC"/. .
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "لا تغييرات للإرسال."
+          else
+            git commit -q -m "chore: import ${ZIP%.zip}"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+          echo "imported=true" >> "$GITHUB_OUTPUT"
+          echo "zip=${ZIP}"   >> "$GITHUB_OUTPUT"
+
+      # ── 2. تحديد المشروع والنسخة وهل ننشر Release ───────────────────────────
+      - name: Resolve project and version
+        shell: bash
+        env:
+          IMPORTED: ${{ steps.import.outputs.imported }}
+          INPUT_PUBLISH: ${{ inputs.publish_release }}
+        run: |
+          set -euo pipefail
+
+          if [ -f settings.gradle ] || [ -f settings.gradle.kts ]; then
+            PROJECT_DIR="."
+          else
+            PROJECT_DIR="$(find . -maxdepth 3 -name 'settings.gradle*' -not -path './.git/*' -print -quit | xargs -r dirname)"
+          fi
+          if [ -z "${PROJECT_DIR}" ]; then
+            echo "::error::لا يوجد مشروع Android في المستودع. ارفع NostickClicker-*.zip إلى الجذر."
+            exit 1
+          fi
+
+          GRADLE_FILE="$(ls "$PROJECT_DIR"/app/build.gradle "$PROJECT_DIR"/app/build.gradle.kts 2>/dev/null | head -n1 || true)"
+          VERSION=""
+          if [ -n "${GRADLE_FILE}" ]; then
+            VERSION="$(grep -E '^[[:space:]]*versionName[[:space:]]*=?[[:space:]]*"' "$GRADLE_FILE" | head -n1 | sed -E 's/.*"([^"]+)".*/\1/' || true)"
+          fi
+          VERSION="${VERSION:-0.0.0}"
+
+          PUBLISH="false"
+          if [ "${IMPORTED}" = "true" ] || [ "${INPUT_PUBLISH}" = "true" ]; then PUBLISH="true"; fi
+
+          {
+            echo "PROJECT_DIR=${PROJECT_DIR}"
+            echo "VERSION=${VERSION}"
+            echo "TAG=v${VERSION}"
+            echo "PUBLISH=${PUBLISH}"
+            echo "RELEASE_SHA=$(git rev-parse HEAD)"
+          } >> "$GITHUB_ENV"
+          echo "Project=${PROJECT_DIR}  Version=${VERSION}  Publish=${PUBLISH}"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Prepare Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/cmdline-tools/16.0/bin:$PATH"
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;${BUILD_TOOLS}"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      # ── 3. البناء (مع إعادة المحاولة عند أخطاء Maven المؤقتة مثل 429) ───────
+      - name: Build debug + release APK and release AAB
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          for attempt in 1 2 3 4; do
+            if gradle --no-daemon --stacktrace --max-workers=2 assembleDebug assembleRelease bundleRelease; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 4 ]; then
+              wait_seconds=$((attempt * 30))
+              echo "Gradle failed (possibly Maven 429); retrying in ${wait_seconds}s..."
+              sleep "$wait_seconds"
+            fi
+          done
+          echo "Gradle failed after 4 attempts. Check the first error above."
+          exit 1
+
+      # ── 4. التوقيع ──────────────────────────────────────────────────────────
+      - name: Prepare keystore
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          if [ -n "${KEYSTORE_BASE64}" ] && [ -n "${KEYSTORE_PASSWORD}" ] && [ -n "${KEY_ALIAS}" ]; then
+            echo "${KEYSTORE_BASE64}" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "REAL_KEY=true" >> "$GITHUB_ENV"
+            echo "KS_ALIAS=${KEY_ALIAS}" >> "$GITHUB_ENV"
+          else
+            echo "::warning::لا توجد Secrets للتوقيع — يُستخدم مفتاح مؤقت (للتجربة فقط). لن يُنشر AAB."
+            keytool -genkeypair -keystore "$RUNNER_TEMP/release.jks" \
+              -alias temp -keyalg RSA -keysize 2048 -validity 3650 \
+              -storepass temp1234 -keypass temp1234 \
+              -dname "CN=NostickClicker Test, O=Nostick, C=IQ" > /dev/null
+            echo "REAL_KEY=false" >> "$GITHUB_ENV"
+            echo "KS_ALIAS=temp" >> "$GITHUB_ENV"
+          fi
+
+      - name: Sign and collect artifacts
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          BT="$ANDROID_HOME/build-tools/${BUILD_TOOLS}"
+          mkdir -p dist
+
+          if [ "${REAL_KEY}" = "true" ]; then
+            export KS_PASS="${KEYSTORE_PASSWORD}"
+            export KEY_PASS="${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+          else
+            export KS_PASS="temp1234"
+            export KEY_PASS="temp1234"
+          fi
+
+          UNSIGNED="$(find "$PROJECT_DIR" -type f -path '*/outputs/apk/release/*.apk' -print -quit)"
+          [ -n "${UNSIGNED}" ] || { echo "::error::Release APK not found"; exit 1; }
+          "$BT/zipalign" -p -f 4 "${UNSIGNED}" "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "${KS_ALIAS}" \
+            --ks-pass env:KS_PASS --key-pass env:KEY_PASS \
+            --out "dist/${APP_NAME}-${VERSION}-release.apk" "$RUNNER_TEMP/aligned.apk"
+          "$BT/apksigner" verify --verbose "dist/${APP_NAME}-${VERSION}-release.apk"
+
+          DEBUG="$(find "$PROJECT_DIR" -type f -path '*/outputs/apk/debug/*.apk' -print -quit)"
+          [ -n "${DEBUG}" ] || { echo "::error::Debug APK not found"; exit 1; }
+          cp "${DEBUG}" "dist/${APP_NAME}-${VERSION}-debug.apk"
+
+          if [ "${REAL_KEY}" = "true" ]; then
+            AAB="$(find "$PROJECT_DIR" -type f -path '*/outputs/bundle/release/*.aab' -print -quit)"
+            [ -n "${AAB}" ] || { echo "::error::AAB not found"; exit 1; }
+            cp "${AAB}" "dist/${APP_NAME}-${VERSION}-release.aab"
+            jarsigner -keystore "$RUNNER_TEMP/release.jks" \
+              -storepass:env KS_PASS -keypass:env KEY_PASS \
+              "dist/${APP_NAME}-${VERSION}-release.aab" "${KS_ALIAS}" > /dev/null
+          fi
+
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          ls -la dist
+          {
+            echo "### ${APP_NAME} ${VERSION}"
+            echo '```'
+            cat dist/SHA256SUMS.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-${{ env.VERSION }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      # ── 5. النشر (فقط عند رفع zip جديد أو عند الطلب اليدوي) ─────────────────
+      - name: Publish GitHub Release
+        if: env.PUBLISH == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ env.RELEASE_SHA }}
+          name: ${{ env.APP_NAME }} ${{ env.VERSION }}
+          prerelease: ${{ contains(env.VERSION, '-') }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: dist/*
