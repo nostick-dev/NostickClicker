@@ -1,4 +1,4 @@
-# NostickClicker 1.0.1
+# NostickClicker 1.0.2
 
 Native Android (Kotlin) auto-clicker and game-controls overlay. 100% offline.
 Created by **Nostick**. © 2026 Nostick — all rights reserved.
@@ -11,7 +11,7 @@ Created by **Nostick**. © 2026 Nostick — all rights reserved.
 - Auto-clicker: numbered click points, 40–2000 ms, stop-after limit.
 - Floating menu (portrait/landscape), minimize to a bubble.
 - Profiles: buttons (tap / hold / hold lock / spam / auto spam), system buttons, Move / Look joysticks.
-- Move stick with walk lock; Camera stick that turns continuously and starts from where you touch.
+- Move stick with walk lock; Look pad that copies your thumb like a touch screen.
 - Each control taps its own target point (green numbered marker).
 - Optional Shizuku mode for real multi-touch without stutter.
 - Arabic / English, dark UI, no Internet permission.

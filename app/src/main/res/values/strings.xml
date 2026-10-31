@@ -141,5 +141,5 @@
     <string name="action_desc_home">Android Home button.</string>
     <string name="action_desc_recents">Android Recent apps button.</string>
     <string name="hint_move">Drag outside the circle and let go to lock walking. Tap the stick to unlock.</string>
-    <string name="hint_look">The camera starts from wherever you touch. Keep the thumb pushed to keep turning.</string>
+    <string name="hint_look">Works like touching the game screen: your thumb\'s movement is copied to the game. Place the pad anywhere and put the green marker on the open part of the game screen where the camera drag should start.</string>
 </resources>

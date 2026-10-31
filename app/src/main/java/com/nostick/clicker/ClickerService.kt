@@ -29,7 +29,6 @@ import android.graphics.Point
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -1077,7 +1076,11 @@ class ClickerService : AccessibilityService() {
             ControlWidget.CAMERA_JOYSTICK -> getString(R.string.widget_look)
         }
         val offset = (n % 6) * 0.04f
-        val width = if (isButton) 0.16f else 0.32f
+        val width = when (widget) {
+            ControlWidget.BUTTON -> 0.16f
+            ControlWidget.MOVE_JOYSTICK -> 0.32f
+            ControlWidget.CAMERA_JOYSTICK -> 0.5f
+        }
         val event = ControlEvent(
             id = System.nanoTime(),
             label = label,
@@ -1088,7 +1091,7 @@ class ClickerService : AccessibilityService() {
             y = 0.30f + offset,
             width = width,
             height = width * 0.75f,
-            sensitivity = if (widget == ControlWidget.CAMERA_JOYSTICK) 2f else 1f
+            sensitivity = 1f
         )
         profile.controls.add(event)
         rebuildControls()
@@ -1166,10 +1169,12 @@ class ClickerService : AccessibilityService() {
         val sizeLabel = Ui.text(this, "", 13f, Ui.MUTED)
         val sizeSeek = SeekBar(this)
         Ui.styleSeekBar(sizeSeek)
-        sizeSeek.max = 152
-        sizeSeek.progress = (ev.width * 360f).roundToInt().coerceIn(48, 200) - 48
+        val minSize = if (ev.widget == ControlWidget.CAMERA_JOYSTICK) 80 else 48
+        val maxSize = if (ev.widget == ControlWidget.CAMERA_JOYSTICK) 320 else 200
+        sizeSeek.max = maxSize - minSize
+        sizeSeek.progress = (ev.width * 360f).roundToInt().coerceIn(minSize, maxSize) - minSize
         fun refreshSize() {
-            sizeLabel.text = getString(R.string.control_size_fmt, sizeSeek.progress + 48)
+            sizeLabel.text = getString(R.string.control_size_fmt, sizeSeek.progress + minSize)
         }
         sizeSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) = refreshSize()
@@ -1226,7 +1231,7 @@ class ClickerService : AccessibilityService() {
                 } else {
                     ev.sensitivity = 0.5f + sensSeek.progress / 10f
                 }
-                ev.width = (sizeSeek.progress + 48) / 360f
+                ev.width = (sizeSeek.progress + minSize) / 360f
                 ev.height = ev.width * 0.75f
                 closePanel()
                 rebuildControls()
@@ -1268,18 +1273,14 @@ class ClickerService : AccessibilityService() {
         var outside = false
         var ignoreTouch = false
 
-        // Camera stick: relative, continuous turning.
+        // Look pad: the game finger copies the movement of the thumb (like a touch screen).
         var camKey: Any = Any()
-        var originX = 0f
-        var originY = 0f
         var camStartX = 0f
         var camStartY = 0f
         var camPosX = 0f
         var camPosY = 0f
-        var camDx = 0f
-        var camDy = 0f
-        var camLast = 0L
-        val camTick = Runnable { cameraStep(this@ControlView) }
+        var lastRawX = 0f
+        var lastRawY = 0f
 
         val repeat = object : Runnable {
             override fun run() {
@@ -1294,7 +1295,6 @@ class ClickerService : AccessibilityService() {
             active = false
             locked = false
             handler.removeCallbacks(repeat)
-            handler.removeCallbacks(camTick)
             touch().up(this)
             touch().up(camKey)
             resumeBlockers(this)
@@ -1347,9 +1347,14 @@ class ClickerService : AccessibilityService() {
 
     private fun addControlView(ev: ControlEvent, index: Int, screen: Point) {
         val isButton = ev.widget == ControlWidget.BUTTON
-        val sizeDp = (ev.width * 360f).coerceIn(48f, 200f)
-        val wPx = dp(sizeDp.roundToInt())
-        val hPx = if (isButton) dp((sizeDp * 0.75f).coerceAtLeast(44f).roundToInt()) else wPx
+        val isCamera = ev.widget == ControlWidget.CAMERA_JOYSTICK
+        val sizeDp = (ev.width * 360f).coerceIn(if (isCamera) 80f else 48f, if (isCamera) 320f else 200f)
+        val wPx = dp((if (isCamera) sizeDp * 1.3f else sizeDp).roundToInt())
+        val hPx = when {
+            isButton -> dp((sizeDp * 0.75f).coerceAtLeast(44f).roundToInt())
+            isCamera -> dp(sizeDp.roundToInt())
+            else -> wPx
+        }
 
         var knob: View? = null
         var lock: View? = null
@@ -1360,6 +1365,21 @@ class ClickerService : AccessibilityService() {
                 setPadding(dp(4), dp(2), dp(4), dp(2))
                 background = controlBackground(false)
             }
+        } else if (isCamera) {
+            // Look pad: a touch area. A small dot follows the thumb while it is down.
+            val frame = FrameLayout(this)
+            frame.background = Ui.rounded(this, 0x44000000, 18, 0x88FFFFFF.toInt(), 2)
+            val dot = View(this)
+            dot.background = Ui.oval(0xFFF2F2F2.toInt(), 0xFFB5B5B5.toInt(), dp(1))
+            dot.visibility = if (editorMode) View.VISIBLE else View.GONE
+            frame.addView(dot, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
+            val tag = (if (editorMode) "$index " else "") + getString(R.string.widget_look)
+            frame.addView(
+                Ui.text(this, tag, 10f, if (editorMode) Ui.MUTED else 0x88FFFFFF.toInt(), true),
+                FrameLayout.LayoutParams(WRAP, WRAP, Gravity.CENTER_HORIZONTAL or Gravity.TOP).apply { topMargin = dp(6) }
+            )
+            knob = dot
+            frame
         } else {
             // Classic joystick: dark translucent base, neutral white thumb.
             val frame = FrameLayout(this)
@@ -1703,10 +1723,10 @@ class ClickerService : AccessibilityService() {
                 resetKnob(cv)
             }
             ControlWidget.CAMERA_JOYSTICK -> {
-                handler.removeCallbacks(cv.camTick)
                 touch().up(cv.camKey)
                 resumeBlockers(cv)
                 resetKnob(cv)
+                cv.knob?.visibility = View.GONE
             }
             ControlWidget.BUTTON -> when (ev.action) {
                 ControlAction.SPAM -> {
@@ -1724,78 +1744,84 @@ class ClickerService : AccessibilityService() {
     }
 
     /**
-     * Camera stick. Wherever the thumb lands is the neutral point, so touching it never
-     * turns the camera by itself. Pushing the thumb in a direction turns the camera that
-     * way, faster the further you push, and it keeps turning for as long as you hold the
-     * push (also at the rim of the circle).
+     * Look pad. It behaves like touching the game screen directly: the game finger starts at
+     * the control's target and copies every movement of the thumb on the pad (scaled by the
+     * sensitivity), with no delay-based drift and no dead zone. When the game finger runs
+     * out of room it is lifted and put back further behind, so the camera never stops.
      */
     private fun startCamera(cv: ControlView, t: FloatArray, m: MotionEvent) {
         cv.camStartX = t[0]
         cv.camStartY = t[1]
         cv.camPosX = t[0]
         cv.camPosY = t[1]
-        cv.originX = m.rawX
-        cv.originY = m.rawY
-        cv.camDx = 0f
-        cv.camDy = 0f
+        cv.lastRawX = m.rawX
+        cv.lastRawY = m.rawY
         cv.camKey = Any()
-        cv.camLast = SystemClock.uptimeMillis()
         touch().down(cv.camKey, t[0], t[1])
-        handler.removeCallbacks(cv.camTick)
-        handler.postDelayed(cv.camTick, 16L)
+        cv.knob?.visibility = View.VISIBLE
+        moveLookDot(cv, m)
     }
 
-    private fun cameraStep(cv: ControlView) {
+    private fun moveLookDot(cv: ControlView, m: MotionEvent) {
+        val c = centerOf(cv.view)
+        val r = dp(9).toFloat()
+        val maxX = (cv.view.width / 2f - r).coerceAtLeast(0f)
+        val maxY = (cv.view.height / 2f - r).coerceAtLeast(0f)
+        cv.knob?.let {
+            it.translationX = (m.rawX - c[0]).coerceIn(-maxX, maxX)
+            it.translationY = (m.rawY - c[1]).coerceIn(-maxY, maxY)
+        }
+    }
+
+    private fun lookMove(cv: ControlView, m: MotionEvent) {
         if (!touch().isDown(cv.camKey)) return
-        val now = SystemClock.uptimeMillis()
-        val dt = (now - cv.camLast).coerceIn(1L, 60L) / 1000f
-        cv.camLast = now
+        val gain = cv.event.sensitivity
+        val nx = cv.camPosX + (m.rawX - cv.lastRawX) * gain
+        val ny = cv.camPosY + (m.rawY - cv.lastRawY) * gain
+        cv.lastRawX = m.rawX
+        cv.lastRawY = m.rawY
+        moveLookDot(cv, m)
+
         val s = screenSize()
-        val speed = cv.event.sensitivity * dp(150) // pixels per second at full push
-        cv.camPosX += cv.camDx * speed * dt
-        cv.camPosY += cv.camDy * speed * dt
-        val reach = min(s.x, s.y) * 0.32f
+        val reach = min(s.x, s.y) * 0.35f
         val margin = dp(8).toFloat()
-        val off = hypot(cv.camPosX - cv.camStartX, cv.camPosY - cv.camStartY)
-        val outOfRoom = off > reach || cv.camPosX < margin || cv.camPosX > s.x - margin ||
-            cv.camPosY < margin || cv.camPosY > s.y - margin
+        val ox = nx - cv.camStartX
+        val oy = ny - cv.camStartY
+        val off = hypot(ox, oy)
+        val outOfRoom = off > reach || nx < margin || nx > s.x - margin ||
+            ny < margin || ny > s.y - margin
         if (outOfRoom) {
-            // The game finger ran out of room: lift it and put it back at the start so the
-            // camera keeps turning.
+            // Lift the game finger and put it back on the opposite side of the start point,
+            // which gives the movement direction 1.5x more room before the next reset.
+            val ux = if (off > 0f) ox / off else 0f
+            val uy = if (off > 0f) oy / off else 0f
+            val wx = (cv.camStartX - ux * reach * 0.5f).coerceIn(margin * 2, s.x - margin * 2)
+            val wy = (cv.camStartY - uy * reach * 0.5f).coerceIn(margin * 2, s.y - margin * 2)
             touch().up(cv.camKey)
             cv.camKey = Any()
-            cv.camPosX = cv.camStartX
-            cv.camPosY = cv.camStartY
-            touch().down(cv.camKey, cv.camPosX, cv.camPosY)
+            cv.camPosX = wx
+            cv.camPosY = wy
+            touch().down(cv.camKey, wx, wy)
         } else {
-            touch().move(cv.camKey, cv.camPosX, cv.camPosY)
+            cv.camPosX = nx
+            cv.camPosY = ny
+            touch().move(cv.camKey, nx, ny)
         }
-        handler.postDelayed(cv.camTick, 16L)
     }
 
     private fun joystickMove(cv: ControlView, m: MotionEvent) {
         val ev = cv.event
-        val camera = ev.widget == ControlWidget.CAMERA_JOYSTICK
-        if (camera) {
-            if (!touch().isDown(cv.camKey)) return
-        } else if (!touch().isDown(cv)) {
+        if (ev.widget == ControlWidget.CAMERA_JOYSTICK) {
+            lookMove(cv, m)
             return
         }
+        if (!touch().isDown(cv)) return
         val radius = min(cv.view.width, cv.view.height) / 2f
         if (radius <= 0f) return
         val travel = radius * 0.58f // the thumb radius is 42% of the base radius
-        val ox: Float
-        val oy: Float
-        if (camera) {
-            ox = cv.originX
-            oy = cv.originY
-        } else {
-            val c = centerOf(cv.view)
-            ox = c[0]
-            oy = c[1]
-        }
-        var dx = m.rawX - ox
-        var dy = m.rawY - oy
+        val c = centerOf(cv.view)
+        var dx = m.rawX - c[0]
+        var dy = m.rawY - c[1]
         val dist = hypot(dx, dy)
         if (dist > travel && dist > 0f) {
             dx = dx / dist * travel
@@ -1805,18 +1831,7 @@ class ClickerService : AccessibilityService() {
             it.translationX = dx
             it.translationY = dy
         }
-        if (camera) {
-            var rx = dx / travel
-            var ry = dy / travel
-            if (hypot(rx, ry) < 0.08f) {
-                rx = 0f
-                ry = 0f
-            }
-            cv.camDx = rx
-            cv.camDy = ry
-            return
-        }
-        // Move stick: leaving the base circle arms the lock (released there = latched).
+        // Leaving the base circle arms the lock (released there = latched).
         val outside = dist > radius
         if (outside != cv.outside) {
             cv.outside = outside

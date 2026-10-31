@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2
+- **Look pad**: the camera control is now a touch pad that behaves like touching the game
+  screen directly. The game finger copies the movement of your thumb 1:1 (scaled by the
+  sensitivity), with no joystick drift, no dead zone and no speed ramp. Place it anywhere,
+  up to 416 x 320 dp. When the game finger runs out of room it is lifted and put back
+  behind the start point, so the camera never stops turning.
+
 ## 1.0.1
 - **Camera stick rewritten**: the point where you touch is now the neutral point, so
   touching it never turns the camera by itself; pushing in a direction turns the camera

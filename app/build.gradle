@@ -19,8 +19,8 @@ android {
         minSdk 26                   // Android 8.0 Oreo — TYPE_APPLICATION_OVERLAY baseline
         targetSdk 36                // Android 16
 
-        versionCode 2
-        versionName "1.0.1"
+        versionCode 3
+        versionName "1.0.2"
 
         // No internet; no network security config needed
     }
