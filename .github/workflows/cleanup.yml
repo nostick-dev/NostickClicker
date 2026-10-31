@@ -1,0 +1,54 @@
+name: Cleanup (runs / releases / tags)
+
+# تشغيل يدوي فقط: Actions → Cleanup → Run workflow
+# ملاحظة: ضعه في .github/workflows/cleanup.yml
+
+on:
+  workflow_dispatch:
+    inputs:
+      delete_runs:
+        description: 'احذف كل عمليات البناء (Workflow runs)'
+        type: boolean
+        default: true
+      delete_releases_and_tags:
+        description: 'احذف كل الـ Releases والـ tags'
+        type: boolean
+        default: false
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Delete workflow runs
+        if: inputs.delete_runs
+        shell: bash
+        run: |
+          set -uo pipefail
+          for round in $(seq 1 60); do
+            ids="$(gh api "repos/${GH_REPO}/actions/runs?per_page=100" --jq '.workflow_runs[].id' | grep -vx "${GITHUB_RUN_ID}" || true)"
+            [ -z "${ids}" ] && break
+            for id in ${ids}; do
+              gh api -X DELETE "repos/${GH_REPO}/actions/runs/${id}" > /dev/null || true
+            done
+            echo "round ${round} done"
+          done
+
+      - name: Delete releases and tags
+        if: inputs.delete_releases_and_tags
+        shell: bash
+        run: |
+          set -uo pipefail
+          gh release list --limit 1000 --json tagName --jq '.[].tagName' | while read -r tag; do
+            [ -n "${tag}" ] && gh release delete "${tag}" --cleanup-tag --yes || true
+          done
+          # tags المتبقية بدون Release
+          gh api "repos/${GH_REPO}/git/matching-refs/tags" --jq '.[].ref' | while read -r ref; do
+            [ -n "${ref}" ] && gh api -X DELETE "repos/${GH_REPO}/git/${ref}" > /dev/null || true
+          done
