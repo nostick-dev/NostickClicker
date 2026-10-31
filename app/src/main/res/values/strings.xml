@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App identity -->
+    <string name="app_name">NostickClicker</string>
+    <string name="service_label">NostickClicker Auto Tap</string>
+    <string name="tagline">Smart auto clicker · Custom game controls · 100% offline</string>
+    <string name="copyright">© 2026 Nostick. All rights reserved.</string>
+    <string name="version_fmt">Version %s</string>
+    <string name="accessibility_description">NostickClicker uses the Accessibility API solely to simulate automated touch gestures at locations you choose. It does not read screen content, collect data, or connect to the internet.</string>
+
+    <!-- Prominent disclosure -->
+    <string name="disclosure_title">Before we begin</string>
+    <string name="disclosure_section_what_title">🛡️ What NostickClicker uses</string>
+    <string name="disclosure_section_what_body">NostickClicker uses Android\'s AccessibilityService API exclusively to simulate taps and swipes at the positions you place on screen. This is the only mechanism that allows gesture injection on unrooted devices.</string>
+    <string name="disclosure_section_no_title">🔒 What we never do</string>
+    <string name="disclosure_section_no_body">We never read, collect, store or share personal data, app content or screen information. We do not access your contacts, messages, files, location, camera or microphone. Nothing ever leaves your device.</string>
+    <string name="disclosure_section_offline_title">📴 100% offline by design</string>
+    <string name="disclosure_section_offline_body">NostickClicker has no internet permission and never connects to a server. Everything you set up stays on your device, and the app works without a network.</string>
+    <string name="disclosure_understand">I understand — continue</string>
+    <string name="disclosure_exit">Exit</string>
+
+    <!-- Main screen -->
+    <string name="main_setup_title">SETUP</string>
+    <string name="step1_title">Accessibility service</string>
+    <string name="step1_desc">Lets the app perform taps for you</string>
+    <string name="step2_title">Display over other apps</string>
+    <string name="step2_desc">Shows the floating menu above your game</string>
+    <string name="status_enabled">✓ Enabled</string>
+    <string name="status_tap_to_enable">Tap to enable</string>
+    <string name="setup_incomplete">Complete both steps to start</string>
+    <string name="setup_complete">All set — you\'re ready to go</string>
+    <string name="btn_start">Start clicker</string>
+    <string name="btn_profiles">Profiles &amp; layouts</string>
+    <string name="toast_enable_accessibility">Enable the Accessibility service first</string>
+    <string name="toast_enable_overlay">Allow \"Display over other apps\" first</string>
+    <string name="toast_service_not_connected">The service is not connected yet. Turn NostickClicker off and on again in Accessibility settings.</string>
+
+    <!-- Floating menu -->
+    <string name="btn_play_pause">Start / stop clicking</string>
+    <string name="btn_add">Add click point</string>
+    <string name="btn_remove">Remove last click point</string>
+    <string name="btn_speed">Click speed</string>
+    <string name="btn_editor">Edit on-screen controls</string>
+    <string name="btn_minimize">Minimize menu</string>
+    <string name="btn_close">Close everything</string>
+    <string name="btn_restore_menu">Show menu</string>
+    <string name="ms_fmt">%d ms</string>
+
+    <!-- Speed panel -->
+    <string name="settings_title">Click speed</string>
+    <string name="settings_ok">Apply</string>
+    <string name="cps_fmt">%s clicks / second</string>
+    <string name="stop_after">Stop after (clicks)</string>
+
+    <!-- Toasts -->
+    <string name="toast_no_points">Add at least one click point first</string>
+    <string name="toast_point_added">Point added — drag it into place</string>
+    <string name="toast_point_removed">Point removed</string>
+    <string name="toast_max_points">Maximum of 20 points reached</string>
+    <string name="toast_finished">Finished — %d clicks</string>
+    <string name="toast_closed">Closed. Open the app and tap Start to bring it back.</string>
+    <string name="toast_no_target">This control has no target yet. Set one in the layout editor.</string>
+
+    <!-- On-screen layout editor -->
+    <string name="ed_add_button">+ Button</string>
+    <string name="ed_add_move">+ Move</string>
+    <string name="ed_add_look">+ Look</string>
+    <string name="ed_done">Save</string>
+    <string name="ed_discard">Discard</string>
+    <string name="ed_new_profile">+ New profile</string>
+    <string name="profile_saved">Saved</string>
+    <string name="default_profile_name">Profile %d</string>
+    <string name="widget_button">Button</string>
+    <string name="widget_move">MOVE</string>
+    <string name="widget_look">LOOK</string>
+    <string name="control_properties">Control settings</string>
+    <string name="control_label">Label</string>
+    <string name="control_action">Action</string>
+    <string name="control_system">System buttons</string>
+    <string name="control_interval">Repeat interval (ms)</string>
+    <string name="control_size_fmt">Size: %d dp</string>
+    <string name="control_sensitivity_fmt">Sensitivity: %s×</string>
+    <string name="control_target_hint">Drag the green numbered marker to the exact spot this control should tap.</string>
+    <string name="control_delete">Delete control</string>
+    <string name="action_click">Tap</string>
+    <string name="action_hold">Hold</string>
+    <string name="action_toggle">Auto spam</string>
+    <string name="action_spam">Spam</string>
+    <string name="action_back">Back</string>
+    <string name="action_home">Home</string>
+    <string name="action_recents">Recents</string>
+
+    <!-- Profiles screen -->
+    <string name="dashboard_title">Profiles &amp; layouts</string>
+    <string name="service_active">Controls are on screen</string>
+    <string name="service_hidden">Controls are hidden</string>
+    <string name="service_not_connected">Service not connected</string>
+    <string name="dashboard_help">Make one layout per game. Press Start to show the menu, then switch profiles any time.</string>
+    <string name="btn_show_controls">Show controls</string>
+    <string name="btn_hide_controls">Hide controls</string>
+    <string name="profiles_title">Profiles</string>
+    <string name="profile_active">Active</string>
+    <string name="profile_use">Use</string>
+    <string name="profile_controls_fmt">%d controls</string>
+    <string name="btn_new_profile">New profile</string>
+    <string name="no_profiles">No profiles yet</string>
+
+    <!-- Profile editor -->
+    <string name="editor_title">Edit profile</string>
+    <string name="profile_name">Profile name</string>
+    <string name="show_controls_switch">Show on-screen controls</string>
+    <string name="btn_edit_layout">Edit layout on screen</string>
+    <string name="editor_help">Opens your game with draggable controls. Each control taps a target point, shown as a green numbered marker, so you can reach far buttons with your thumb.</string>
+    <string name="controls_title">CONTROLS</string>
+    <string name="no_controls">No controls yet. Tap “Edit layout on screen” to add buttons and joysticks.</string>
+    <string name="btn_save_changes">Save changes</string>
+    <string name="btn_delete_profile">Delete profile</string>
+    <string name="btn_delete">Delete</string>
+    <string name="confirm_delete_title">Delete profile?</string>
+    <string name="confirm_delete_body">“%s” and all of its controls will be removed.</string>
+
+    <!-- Shizuku (optional) -->
+    <string name="shizuku_title">Shizuku mode (optional)</string>
+    <string name="shizuku_desc">Real multi-touch with no stutter. Not required.</string>
+    <string name="shizuku_status_off">Not running — tap to open Shizuku</string>
+    <string name="shizuku_status_allow">Tap to allow access</string>
+    <string name="shizuku_status_on">✓ On — smooth multi-touch</string>
+    <string name="shizuku_status_disabled">Off — tap to turn on</string>
+    <string name="toast_shizuku_missing">Install and start Shizuku first</string>
+    <string name="toast_shizuku_failed">Shizuku connection failed — using standard mode</string>
+    <string name="toast_target_on_self">This control\'s target sits on the control itself. Move the green marker away.</string>
+
+    <!-- Actions: new names and descriptions -->
+    <string name="action_hold_toggle">Hold lock</string>
+    <string name="action_desc_click">Taps the target once each time you press.</string>
+    <string name="action_desc_hold">Keeps a finger down on the target while you hold the button.</string>
+    <string name="action_desc_spam">Taps repeatedly while you hold the button.</string>
+    <string name="action_desc_toggle">Press once to start tapping repeatedly, press again to stop.</string>
+    <string name="action_desc_hold_toggle">Press once to keep the target pressed, press again to release.</string>
+    <string name="action_desc_back">Android Back button.</string>
+    <string name="action_desc_home">Android Home button.</string>
+    <string name="action_desc_recents">Android Recent apps button.</string>
+    <string name="hint_move">Drag outside the circle and let go to lock walking. Tap the stick to unlock.</string>
+    <string name="hint_look">The camera starts from wherever you touch. Keep the thumb pushed to keep turning.</string>
+</resources>

@@ -1,0 +1,30 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+    <!-- Rounded square with violet gradient -->
+    <path android:pathData="M24,4H72A20,20 0 0 1 92,24V72A20,20 0 0 1 72,92H24A20,20 0 0 1 4,72V24A20,20 0 0 1 24,4Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:endColor="#6D28D9"
+                android:endX="92"
+                android:endY="92"
+                android:startColor="#A78BFA"
+                android:startX="4"
+                android:startY="4"
+                android:type="linear" />
+        </aapt:attr>
+    </path>
+    <!-- Click ripple -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M48,48m-27,0a27,27 0 1,1 54,0a27,27 0 1,1 -54,0"
+        android:strokeColor="#66FFFFFF"
+        android:strokeWidth="3" />
+    <!-- Cursor -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M36,28L36,66L45,57L52,72L58,69.5L51,55L63,55Z" />
+</vector>

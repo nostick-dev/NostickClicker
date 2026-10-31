@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Outer ring -->
+    <item>
+        <shape android:shape="oval">
+            <solid android:color="#338B5CF6" />
+            <stroke
+                android:width="2dp"
+                android:color="@color/accent" />
+        </shape>
+    </item>
+    <!-- Centre dot: the exact tap position -->
+    <item
+        android:bottom="21dp"
+        android:left="21dp"
+        android:right="21dp"
+        android:top="21dp">
+        <shape android:shape="oval">
+            <solid android:color="@color/accent" />
+        </shape>
+    </item>
+</layer-list>

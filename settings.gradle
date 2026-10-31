@@ -1,0 +1,23 @@
+/*
+ * NostickClicker — Auto Clicker
+ * Copyright (c) 2026 Nostick. All rights reserved.
+ */
+
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = "NostickClicker"
+include ':app'

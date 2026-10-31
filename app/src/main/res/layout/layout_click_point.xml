@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    A draggable target ring. The centre dot is the exact tap position;
+    the number shows the order in which the points are clicked.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/clickPointRoot"
+    android:layout_width="52dp"
+    android:layout_height="52dp"
+    android:background="@drawable/bg_click_point">
+
+    <TextView
+        android:id="@+id/tvIndex"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal|top"
+        android:layout_marginTop="5dp"
+        android:fontFamily="sans-serif-medium"
+        android:textColor="#FFFFFF"
+        android:textSize="11sp"
+        android:textStyle="bold" />
+
+</FrameLayout>

@@ -1,0 +1,68 @@
+/*
+ * NostickClicker — Auto Clicker
+ * Copyright (c) 2026 Nostick. All rights reserved.
+ */
+
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.nostick.clicker'
+
+    // Target Android 16 (API 36) as requested
+    compileSdk 36
+
+    defaultConfig {
+        applicationId "com.nostick.clicker"
+        minSdk 26                   // Android 8.0 Oreo — TYPE_APPLICATION_OVERLAY baseline
+        targetSdk 36                // Android 16
+
+        versionCode 2
+        versionName "1.0.1"
+
+        // No internet; no network security config needed
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'),
+                          'proguard-rules.pro'
+            // Sign with your keystore for production
+        }
+        debug {
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    // AppCompat — AlertDialog, AppCompatActivity
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+
+    // Material 3 — themes, chips, seekbar styling
+    implementation 'com.google.android.material:material:1.12.0'
+
+    // Core KTX — idiomatic Kotlin extensions
+    implementation 'androidx.core:core-ktx:1.13.1'
+
+    // Optional Shizuku mode (real multi-touch). Used only if the user turns it on.
+    implementation 'dev.rikka.shizuku:api:13.1.5'
+    implementation 'dev.rikka.shizuku:provider:13.1.5'
+    implementation 'org.lsposed.hiddenapibypass:hiddenapibypass:4.3'
+
+    // No network libraries — NostickClicker is 100% offline
+}

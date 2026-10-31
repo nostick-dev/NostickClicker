@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    NostickClicker — Auto Clicker
+    Copyright (c) 2026 Nostick. All rights reserved.
+
+    Uses the AccessibilityService API solely to simulate the touch gestures the
+    user explicitly sets up. No personal data is collected, stored or transmitted.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Overlay: draws the floating menu, click points and on-screen controls -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Haptic feedback on menu buttons -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Lets the app see whether the optional Shizuku app is installed -->
+    <queries>
+        <package android:name="moe.shizuku.privileged.api" />
+    </queries>
+
+    <!-- NO INTERNET PERMISSION — by design. NostickClicker is 100% offline. -->
+
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.NostickClicker"
+        tools:targetApi="36">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:windowSoftInputMode="stateHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".ControlDashboardActivity"
+            android:exported="false"
+            android:label="@string/dashboard_title" />
+
+        <activity
+            android:name=".ControlEditorActivity"
+            android:exported="false"
+            android:label="@string/editor_title"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Accessibility service that owns every floating window -->
+        <service
+            android:name=".ClickerService"
+            android:exported="true"
+            android:label="@string/service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- Optional Shizuku integration (receives the Shizuku binder) -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+    </application>
+
+</manifest>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    NostickClicker — AccessibilityService Configuration
+    Copyright (c) 2026 Nostick. All rights reserved.
+
+    canPerformGestures="true"  → allows dispatchGesture() to inject synthetic taps
+    The service does not read screen content or handle accessibility events; it only
+    dispatches gestures at user-defined coordinates. The event-types attribute is
+    intentionally omitted because Android's resource linker rejects typeNone here.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="false"
+    android:description="@string/accessibility_description"
+    android:notificationTimeout="0"
+    android:settingsActivity=".MainActivity" />

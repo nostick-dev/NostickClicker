@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">NostickClicker</string>
+    <string name="service_label">النقر التلقائي NostickClicker</string>
+    <string name="tagline">نقر تلقائي ذكي · أزرار تحكم مخصصة للألعاب · يعمل دون إنترنت</string>
+    <string name="copyright">© 2026 Nostick. جميع الحقوق محفوظة.</string>
+    <string name="version_fmt">الإصدار %s</string>
+    <string name="accessibility_description">يستخدم NostickClicker واجهة Accessibility فقط لمحاكاة لمسات تلقائية في المواضع التي تحددها. لا يقرأ محتوى الشاشة ولا يجمع البيانات ولا يتصل بالإنترنت.</string>
+
+    <string name="disclosure_title">قبل البدء</string>
+    <string name="disclosure_section_what_title">🛡️ ما الذي يستخدمه التطبيق</string>
+    <string name="disclosure_section_what_body">يستخدم NostickClicker خدمة Accessibility حصريًا لمحاكاة النقرات والسحبات في المواضع التي تضعها على الشاشة. هذه هي الطريقة الوحيدة لإرسال اللمسات على الأجهزة غير المروّتة.</string>
+    <string name="disclosure_section_no_title">🔒 ما الذي لا نفعله أبدًا</string>
+    <string name="disclosure_section_no_body">لا نقرأ ولا نجمع ولا نخزّن ولا نشارك أي بيانات شخصية أو محتوى التطبيقات أو معلومات الشاشة. لا نصل إلى جهات الاتصال أو الرسائل أو الملفات أو الموقع أو الكاميرا أو الميكروفون. لا شيء يغادر جهازك.</string>
+    <string name="disclosure_section_offline_title">📴 يعمل دون إنترنت بتصميمه</string>
+    <string name="disclosure_section_offline_body">لا يطلب NostickClicker صلاحية الإنترنت ولا يتصل بأي خادم. كل ما تضبطه يبقى على جهازك، ويعمل التطبيق بدون شبكة.</string>
+    <string name="disclosure_understand">فهمت — متابعة</string>
+    <string name="disclosure_exit">خروج</string>
+
+    <string name="main_setup_title">الإعداد</string>
+    <string name="step1_title">خدمة إمكانية الوصول</string>
+    <string name="step1_desc">تسمح للتطبيق بتنفيذ اللمسات نيابةً عنك</string>
+    <string name="step2_title">الظهور فوق التطبيقات</string>
+    <string name="step2_desc">لعرض القائمة العائمة فوق اللعبة</string>
+    <string name="status_enabled">✓ مفعّل</string>
+    <string name="status_tap_to_enable">اضغط للتفعيل</string>
+    <string name="setup_incomplete">أكمل الخطوتين للبدء</string>
+    <string name="setup_complete">كل شيء جاهز — يمكنك البدء</string>
+    <string name="btn_start">تشغيل النقّار</string>
+    <string name="btn_profiles">الملفات والتخطيطات</string>
+    <string name="toast_enable_accessibility">فعّل خدمة إمكانية الوصول أولًا</string>
+    <string name="toast_enable_overlay">اسمح بـ «الظهور فوق التطبيقات» أولًا</string>
+    <string name="toast_service_not_connected">الخدمة غير متصلة بعد. أوقف NostickClicker ثم شغّله مجددًا من إعدادات إمكانية الوصول.</string>
+
+    <string name="btn_play_pause">بدء / إيقاف النقر</string>
+    <string name="btn_add">إضافة نقطة نقر</string>
+    <string name="btn_remove">حذف آخر نقطة</string>
+    <string name="btn_speed">سرعة النقر</string>
+    <string name="btn_editor">تعديل أزرار الشاشة</string>
+    <string name="btn_minimize">تصغير القائمة</string>
+    <string name="btn_close">إغلاق الكل</string>
+    <string name="btn_restore_menu">إظهار القائمة</string>
+    <string name="ms_fmt">%d م.ث</string>
+
+    <string name="settings_title">سرعة النقر</string>
+    <string name="settings_ok">تطبيق</string>
+    <string name="cps_fmt">%s نقرة / ثانية</string>
+    <string name="stop_after">التوقف بعد (نقرة)</string>
+
+    <string name="toast_no_points">أضف نقطة نقر واحدة على الأقل</string>
+    <string name="toast_point_added">تمت إضافة النقطة — اسحبها إلى مكانها</string>
+    <string name="toast_point_removed">تم حذف النقطة</string>
+    <string name="toast_max_points">الحد الأقصى 20 نقطة</string>
+    <string name="toast_finished">انتهى — %d نقرة</string>
+    <string name="toast_closed">تم الإغلاق. افتح التطبيق واضغط «تشغيل» لإعادته.</string>
+    <string name="toast_no_target">هذا الزر بلا هدف بعد. حدده من محرر التخطيط.</string>
+
+    <string name="ed_add_button">+ زر</string>
+    <string name="ed_add_move">+ حركة</string>
+    <string name="ed_add_look">+ كاميرا</string>
+    <string name="ed_done">حفظ</string>
+    <string name="ed_discard">تجاهل</string>
+    <string name="ed_new_profile">+ ملف جديد</string>
+    <string name="profile_saved">تم الحفظ</string>
+    <string name="default_profile_name">ملف %d</string>
+    <string name="widget_button">زر</string>
+    <string name="widget_move">حركة</string>
+    <string name="widget_look">كاميرا</string>
+    <string name="control_properties">إعدادات العنصر</string>
+    <string name="control_label">الاسم</string>
+    <string name="control_action">الإجراء</string>
+    <string name="control_system">أزرار النظام</string>
+    <string name="control_interval">فاصل التكرار (م.ث)</string>
+    <string name="control_size_fmt">الحجم: %d dp</string>
+    <string name="control_sensitivity_fmt">الحساسية: %s×</string>
+    <string name="control_target_hint">اسحب العلامة الخضراء المرقمة إلى المكان الذي يجب أن ينقر عليه هذا العنصر بالضبط.</string>
+    <string name="control_delete">حذف العنصر</string>
+    <string name="action_click">نقرة</string>
+    <string name="action_hold">ضغط مطوّل</string>
+    <string name="action_toggle">تكرار دائم</string>
+    <string name="action_spam">تكرار</string>
+    <string name="action_back">رجوع</string>
+    <string name="action_home">الرئيسية</string>
+    <string name="action_recents">التطبيقات</string>
+
+    <string name="dashboard_title">الملفات والتخطيطات</string>
+    <string name="service_active">الأزرار ظاهرة على الشاشة</string>
+    <string name="service_hidden">الأزرار مخفية</string>
+    <string name="service_not_connected">الخدمة غير متصلة</string>
+    <string name="dashboard_help">أنشئ تخطيطًا لكل لعبة. اضغط «تشغيل» لإظهار القائمة ثم بدّل الملفات متى شئت.</string>
+    <string name="btn_show_controls">إظهار الأزرار</string>
+    <string name="btn_hide_controls">إخفاء الأزرار</string>
+    <string name="profiles_title">الملفات</string>
+    <string name="profile_active">نشط</string>
+    <string name="profile_use">استخدام</string>
+    <string name="profile_controls_fmt">%d عناصر</string>
+    <string name="btn_new_profile">ملف جديد</string>
+    <string name="no_profiles">لا توجد ملفات بعد</string>
+
+    <string name="editor_title">تعديل الملف</string>
+    <string name="profile_name">اسم الملف</string>
+    <string name="show_controls_switch">إظهار أزرار الشاشة</string>
+    <string name="btn_edit_layout">تعديل التخطيط على الشاشة</string>
+    <string name="editor_help">يفتح لعبتك مع عناصر قابلة للسحب. كل عنصر ينقر على نقطة هدف تظهر كعلامة خضراء مرقمة، فتصل إلى الأزرار البعيدة بإبهامك.</string>
+    <string name="controls_title">العناصر</string>
+    <string name="no_controls">لا توجد عناصر بعد. اضغط «تعديل التخطيط على الشاشة» لإضافة أزرار وعصا تحكم.</string>
+    <string name="btn_save_changes">حفظ التغييرات</string>
+    <string name="btn_delete_profile">حذف الملف</string>
+    <string name="btn_delete">حذف</string>
+    <string name="confirm_delete_title">حذف الملف؟</string>
+    <string name="confirm_delete_body">سيتم حذف «%s» وكل عناصره.</string>
+
+    <string name="shizuku_title">وضع Shizuku (اختياري)</string>
+    <string name="shizuku_desc">لمس متعدد حقيقي بدون تقطيع. غير مطلوب.</string>
+    <string name="shizuku_status_off">غير شغّال — اضغط لفتح Shizuku</string>
+    <string name="shizuku_status_allow">اضغط لمنح الإذن</string>
+    <string name="shizuku_status_on">✓ مفعّل — لمس متعدد سلس</string>
+    <string name="shizuku_status_disabled">متوقف — اضغط للتفعيل</string>
+    <string name="toast_shizuku_missing">ثبّت Shizuku وشغّله أولًا</string>
+    <string name="toast_shizuku_failed">فشل الاتصال بـ Shizuku — تم استخدام الوضع العادي</string>
+    <string name="toast_target_on_self">هدف هذا العنصر موجود فوق العنصر نفسه. حرّك العلامة الخضراء بعيدًا.</string>
+
+    <string name="action_hold_toggle">قفل الضغط</string>
+    <string name="action_desc_click">ينقر الهدف مرة واحدة عند كل ضغطة.</string>
+    <string name="action_desc_hold">يُبقي إصبعًا ضاغطًا على الهدف طالما تضغط الزر.</string>
+    <string name="action_desc_spam">ينقر بشكل متكرر طالما تضغط الزر.</string>
+    <string name="action_desc_toggle">اضغط مرة لبدء النقر المتكرر، واضغط مرة أخرى للإيقاف.</string>
+    <string name="action_desc_hold_toggle">اضغط مرة لتثبيت الضغط على الهدف، واضغط مرة أخرى للتحرير.</string>
+    <string name="action_desc_back">زر الرجوع في أندرويد.</string>
+    <string name="action_desc_home">زر الرئيسية في أندرويد.</string>
+    <string name="action_desc_recents">زر التطبيقات الأخيرة في أندرويد.</string>
+    <string name="hint_move">اسحب خارج الدائرة ثم أفلت لقفل المشي. المس العصا لفك القفل.</string>
+    <string name="hint_look">تبدأ الكاميرا من نقطة لمسك. أبقِ الإبهام مدفوعًا لتستمر في الدوران.</string>
+</resources>
