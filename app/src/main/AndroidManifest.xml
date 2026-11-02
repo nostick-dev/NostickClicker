@@ -18,11 +18,6 @@
     <!-- Lets the app see whether the optional Shizuku app is installed -->
     <queries>
         <package android:name="moe.shizuku.privileged.api" />
-        <!-- Launchable apps (games): lets the optional Shizuku mode find the foreground app's UID -->
-        <intent>
-            <action android:name="android.intent.action.MAIN" />
-            <category android:name="android.intent.category.LAUNCHER" />
-        </intent>
     </queries>
 
     <!-- NO INTERNET PERMISSION — by design. NostickClicker is 100% offline. -->

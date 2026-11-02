@@ -24,7 +24,6 @@ object Prefs {
     private const val KEY_MAX_CLICKS = "max_clicks"
     private const val KEY_ACTIVE_PROFILE = "active_profile_id"
     private const val KEY_SHIZUKU = "shizuku_enabled"
-    private const val KEY_SHIZUKU_TARGET = "shizuku_target_game"
 
     const val MIN_INTERVAL_MS = 40L
     const val MAX_INTERVAL_MS = 2_000L
@@ -67,11 +66,4 @@ object Prefs {
 
     fun setShizukuEnabled(ctx: Context, enabled: Boolean) =
         sp(ctx).edit().putBoolean(KEY_SHIZUKU, enabled).apply()
-
-    /** Shizuku mode: deliver injected touches to the foreground app only. On by default. */
-    fun isShizukuTargetGame(ctx: Context): Boolean =
-        sp(ctx).getBoolean(KEY_SHIZUKU_TARGET, true)
-
-    fun setShizukuTargetGame(ctx: Context, enabled: Boolean) =
-        sp(ctx).edit().putBoolean(KEY_SHIZUKU_TARGET, enabled).apply()
 }

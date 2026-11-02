@@ -83,18 +83,8 @@ class ShizukuInjector : TouchInjector {
     private val flushRunnable = Runnable { flushMove() }
 
     private var service: Any? = null
-    private var injectPlain: Method? = null
-    private var injectTarget: Method? = null
-
-    /**
-     * UID of the app that must receive the touches (the game in the foreground), or -1.
-     * With a target, our own overlay windows are skipped by the input system, so a control's
-     * target can sit under another control without that control ever seeing the touch.
-     */
-    @Volatile
-    var targetUid: Int = -1
-
-    fun hasTarget(): Boolean = targetUid > 0 && injectTarget != null
+    private var inject: Method? = null
+    private var injectArgs = 2
 
     /** Connects to the system input service through Shizuku. */
     fun prepare(): Boolean {
@@ -109,17 +99,13 @@ class ShizukuInjector : TouchInjector {
             val svc = asInterface.invoke(null, wrapped) ?: return false
             service = svc
             val intType = Int::class.javaPrimitiveType
-            injectPlain = try {
+            inject = try {
+                injectArgs = 2
                 svc.javaClass.getMethod("injectInputEvent", InputEvent::class.java, intType)
             } catch (e: NoSuchMethodException) {
-                null
-            }
-            injectTarget = try {
+                injectArgs = 3
                 svc.javaClass.getMethod("injectInputEventToTarget", InputEvent::class.java, intType, intType)
-            } catch (e: NoSuchMethodException) {
-                null
             }
-            if (injectPlain == null && injectTarget == null) return false
             return true
         } catch (e: Throwable) {
             return false
@@ -223,8 +209,8 @@ class ShizukuInjector : TouchInjector {
     }
 
     private fun send(action: Int, timeMs: Long = 0L) {
+        val method = inject ?: return
         val svc = service ?: return
-        if (injectPlain == null && injectTarget == null) return
         val list = pts.values.toList()
         val n = list.size
         val props = Array(n) { i ->
@@ -253,16 +239,7 @@ class ShizukuInjector : TouchInjector {
             0, 0, 1f, 1f, -1, 0, InputDevice.SOURCE_TOUCHSCREEN, 0
         )
         try {
-            val target = targetUid
-            val withTarget = injectTarget
-            val plain = injectPlain
-            if (target > 0 && withTarget != null) {
-                withTarget.invoke(svc, event, 0, target)
-            } else if (plain != null) {
-                plain.invoke(svc, event, 0)
-            } else {
-                withTarget?.invoke(svc, event, 0, -1)
-            }
+            if (injectArgs == 2) method.invoke(svc, event, 0) else method.invoke(svc, event, 0, -1)
         } catch (_: Throwable) {
         } finally {
             event.recycle()

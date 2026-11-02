@@ -5,11 +5,11 @@
     <string name="tagline">نقر تلقائي ذكي · أزرار تحكم مخصصة للألعاب · يعمل دون إنترنت</string>
     <string name="copyright">© 2026 Nostick. جميع الحقوق محفوظة.</string>
     <string name="version_fmt">الإصدار %s</string>
-    <string name="accessibility_description">يستخدم NostickClicker واجهة Accessibility فقط لمحاكاة لمسات تلقائية في المواضع التي تحددها. لا يقرأ محتوى الشاشة ولا يجمع البيانات ولا يتصل بالإنترنت. وفي وضع Shizuku الاختياري يسجّل اسم التطبيق الظاهر فقط.</string>
+    <string name="accessibility_description">يستخدم NostickClicker واجهة Accessibility فقط لمحاكاة لمسات تلقائية في المواضع التي تحددها. لا يقرأ محتوى الشاشة ولا يجمع البيانات ولا يتصل بالإنترنت.</string>
 
     <string name="disclosure_title">قبل البدء</string>
     <string name="disclosure_section_what_title">🛡️ ما الذي يستخدمه التطبيق</string>
-    <string name="disclosure_section_what_body">يستخدم NostickClicker خدمة Accessibility حصريًا لمحاكاة النقرات والسحبات في المواضع التي تضعها على الشاشة. هذه هي الطريقة الوحيدة لإرسال اللمسات على الأجهزة غير المروّتة. وفي وضع Shizuku الاختياري يسجّل فقط اسم التطبيق الظاهر (وليس محتواه) ليوصل اللمسات إلى ذلك التطبيق وحده.</string>
+    <string name="disclosure_section_what_body">يستخدم NostickClicker خدمة Accessibility حصريًا لمحاكاة النقرات والسحبات في المواضع التي تضعها على الشاشة. هذه هي الطريقة الوحيدة لإرسال اللمسات على الأجهزة غير المروّتة.</string>
     <string name="disclosure_section_no_title">🔒 ما الذي لا نفعله أبدًا</string>
     <string name="disclosure_section_no_body">لا نقرأ ولا نجمع ولا نخزّن ولا نشارك أي بيانات شخصية أو محتوى التطبيقات أو معلومات الشاشة. لا نصل إلى جهات الاتصال أو الرسائل أو الملفات أو الموقع أو الكاميرا أو الميكروفون. لا شيء يغادر جهازك.</string>
     <string name="disclosure_section_offline_title">📴 يعمل دون إنترنت بتصميمه</string>
@@ -118,7 +118,6 @@
     <string name="shizuku_status_disabled">متوقف — اضغط للتفعيل</string>
     <string name="toast_shizuku_missing">ثبّت Shizuku وشغّله أولًا</string>
     <string name="toast_shizuku_failed">فشل الاتصال بـ Shizuku — تم استخدام الوضع العادي</string>
-    <string name="toast_target_on_self">هدف هذا العنصر موجود فوق العنصر نفسه. حرّك العلامة الخضراء بعيدًا.</string>
 
     <string name="action_hold_toggle">قفل الضغط</string>
     <string name="action_desc_click">ينقر الهدف مرة واحدة عند كل ضغطة.</string>
@@ -139,7 +138,4 @@
     <string name="color_label">اللون</string>
     <string name="opacity_fmt">الشفافية: %d%%</string>
     <string name="appearance_hint">اضغط على العلامة الخضراء لتحديد ما يفعله هذا العنصر: نوع النقر وسرعة التكرار وغيرها.</string>
-    <string name="shizuku_target_switch">Shizuku: إرسال اللمس إلى اللعبة فقط</string>
-    <string name="shizuku_target_desc">يسمح بوضع هدف تحت عنصر آخر (مثل زر انبطاح تحت عصا الحركة) دون أن يضغط ذلك العنصر. يحتاج وضع Shizuku.</string>
-    <string name="toast_target_under_control">هذا الهدف تحت عنصر آخر. بدون Shizuku يعمل فقط طالما أن ذلك العنصر غير مضغوط.</string>
 </resources>

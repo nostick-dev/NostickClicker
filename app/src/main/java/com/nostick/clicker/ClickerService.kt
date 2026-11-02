@@ -26,6 +26,7 @@ import android.graphics.Color
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Point
+import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
@@ -34,7 +35,6 @@ import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
-import android.provider.Settings
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.Gravity
@@ -71,7 +71,6 @@ class ClickerService : AccessibilityService() {
             private set
 
         private const val STEP_MS = 30L
-        private val IGNORED_PACKAGES = setOf("com.android.systemui", "android")
         private const val MAX_POINTS = 20
         private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
@@ -140,59 +139,8 @@ class ClickerService : AccessibilityService() {
     }
 
     /** Required by AccessibilityService; NostickClicker does not process events. */
-    /**
-     * Only used in the optional Shizuku mode: remembers the name of the app that is in the
-     * foreground (never its content) so injected touches can be delivered to that app alone.
-     */
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (!trackForeground || event == null) return
-        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
-        val pkg = event.packageName?.toString() ?: return
-        if (pkg == packageName || pkg in IGNORED_PACKAGES || pkg == imePackage()) return
-        if (pkg == foregroundPkg) return
-        foregroundPkg = pkg
-        applyTargetUid()
-    }
-
-    private var foregroundPkg: String? = null
-    private var trackForeground = false
-
-    private fun imePackage(): String? = try {
-        Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)?.substringBefore('/')
-    } catch (e: Exception) {
-        null
-    }
-
-    private fun applyTargetUid() {
-        val injector = shizukuInjector ?: return
-        val pkg = foregroundPkg
-        var uid = -1
-        if (trackForeground && pkg != null) {
-            uid = try {
-                packageManager.getPackageUid(pkg, 0)
-            } catch (e: Exception) {
-                -1
-            }
-        }
-        injector.targetUid = uid
-    }
-
-    private fun updateEventTracking() {
-        trackForeground = shizukuInjector != null && Prefs.isShizukuTargetGame(this)
-        try {
-            val info = serviceInfo
-            if (info != null) {
-                info.eventTypes = if (trackForeground) AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED else 0
-                serviceInfo = info
-            }
-        } catch (_: Exception) {
-        }
-        if (!trackForeground) foregroundPkg = null
-        applyTargetUid()
-    }
-
-    /** True when Shizuku delivers touches to the game only (our own windows are skipped). */
-    private fun targetsGameOnly(): Boolean = shizukuInjector?.hasTarget() == true
+    /** Required by AccessibilityService; NostickClicker does not process events. */
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
 
     override fun onInterrupt() {
         stopClicking()
@@ -614,7 +562,6 @@ class ClickerService : AccessibilityService() {
                 toast(R.string.toast_shizuku_failed)
             }
         }
-        updateEventTracking()
     }
 
     private fun tapAt(x: Float, y: Float) {
@@ -1479,8 +1426,7 @@ class ClickerService : AccessibilityService() {
         var markerParams: WindowManager.LayoutParams? = null
         var active = false
         var pressed = false
-        var suspended: List<ControlView> = emptyList()
-        val releaseRunnable = Runnable { resumeBlockers(this@ControlView) }
+        val touchViews = mutableListOf<View>()
 
         // Move stick: latched ("locked") walking.
         var locked = false
@@ -1520,7 +1466,6 @@ class ClickerService : AccessibilityService() {
             handler.removeCallbacks(lookTick)
             touch().up(this)
             touch().up(camKey)
-            resumeBlockers(this)
         }
     }
 
@@ -1537,11 +1482,11 @@ class ClickerService : AccessibilityService() {
     private fun clearControls() {
         controlViews.forEach { cv ->
             cv.stopAll()
+            cv.touchViews.forEach { removeOverlay(it) }
             removeOverlay(cv.view)
             removeOverlay(cv.marker)
         }
         controlViews.clear()
-        suspendCount.clear()
     }
 
     private fun rebuildControls() {
@@ -1650,14 +1595,59 @@ class ClickerService : AccessibilityService() {
         val cv = ControlView(ev, view, params)
         cv.knob = knob
         cv.lockIcon = lock
-        if (!addOverlay(view, params)) return
-        controlViews.add(cv)
-
         if (editorMode) {
+            if (!addOverlay(view, params)) return
+            controlViews.add(cv)
             addMarker(cv, index, screen, wPx)
             attachEditTouch(cv)
         } else {
-            attachRunTouch(cv)
+            // The visible control never catches touches itself. Invisible touch windows cover
+            // it everywhere EXCEPT around the target points (a small hole), so a tap injected
+            // there reaches the game instead of whatever control is drawn on top of it.
+            params.flags = params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            if (!addOverlay(view, params)) return
+            controlViews.add(cv)
+            addTouchWindows(cv, screen)
+        }
+    }
+
+    /** Cuts [hole] out of [r]; the remaining pieces are added to [out]. */
+    private fun subtractRect(r: Rect, hole: Rect, out: MutableList<Rect>) {
+        if (!Rect.intersects(r, hole)) {
+            out.add(Rect(r))
+            return
+        }
+        if (hole.top > r.top) out.add(Rect(r.left, r.top, r.right, hole.top))
+        if (hole.bottom < r.bottom) out.add(Rect(r.left, hole.bottom, r.right, r.bottom))
+        val midTop = maxOf(r.top, hole.top)
+        val midBottom = minOf(r.bottom, hole.bottom)
+        if (hole.left > r.left) out.add(Rect(r.left, midTop, hole.left, midBottom))
+        if (hole.right < r.right) out.add(Rect(hole.right, midTop, r.right, midBottom))
+    }
+
+    private fun addTouchWindows(cv: ControlView, screen: Point) {
+        val p = cv.params
+        var pieces = mutableListOf(Rect(p.x, p.y, p.x + p.width, p.y + p.height))
+        val half = dp(22) // 44 dp square around every target point
+        activeProfile?.controls?.forEach { other ->
+            if (other.type != ControlEventType.SCREEN || !other.enabled) return@forEach
+            if (other.targetX < 0f || other.targetY < 0f) return@forEach
+            val tx = (other.targetX * screen.x).roundToInt()
+            val ty = (other.targetY * screen.y).roundToInt()
+            val hole = Rect(tx - half, ty - half, tx + half, ty + half)
+            val next = mutableListOf<Rect>()
+            pieces.forEach { subtractRect(it, hole, next) }
+            pieces = next
+        }
+        val minSide = dp(6)
+        pieces.forEach { r ->
+            if (r.width() < minSide || r.height() < minSide) return@forEach
+            val v = View(this)
+            val tp = overlayParams(r.width(), r.height(), r.left, r.top)
+            if (addOverlay(v, tp)) {
+                cv.touchViews.add(v)
+                attachRunTouch(cv, v)
+            }
         }
     }
 
@@ -1717,18 +1707,6 @@ class ClickerService : AccessibilityService() {
                         val s = screenSize()
                         ev.targetX = (mp.x + size / 2f) / s.x
                         ev.targetY = (mp.y + size / 2f) / s.y
-                        val longLived = ev.widget != ControlWidget.BUTTON ||
-                            ev.action == ControlAction.HOLD || ev.action == ControlAction.TOGGLE ||
-                            ev.action == ControlAction.SPAM || ev.action == ControlAction.HOLD_TOGGLE
-                        if (longLived && targetInsideSelf(cv)) {
-                            toast(R.string.toast_target_on_self)
-                        } else if (!targetsGameOnly()) {
-                            val tx = ev.targetX * s.x
-                            val ty = ev.targetY * s.y
-                            if (controlViews.any { it !== cv && contains(it, tx, ty) }) {
-                                toast(R.string.toast_target_under_control)
-                            }
-                        }
                     }
                 }
             }
@@ -1776,12 +1754,12 @@ class ClickerService : AccessibilityService() {
     }
 
     /** Normal mode: the control triggers its action on the target point. */
-    private fun attachRunTouch(cv: ControlView) {
+    private fun attachRunTouch(cv: ControlView, touchView: View) {
         val ev = cv.event
-        cv.view.setOnTouchListener { v, m ->
+        touchView.setOnTouchListener { _, m ->
             when (m.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    v.alpha = 0.7f
+                    cv.view.alpha = 0.7f
                     cv.pressed = true
                     if (cv.locked) {
                         // A tap on a locked stick releases it.
@@ -1796,86 +1774,13 @@ class ClickerService : AccessibilityService() {
                     if (!cv.ignoreTouch && ev.widget != ControlWidget.BUTTON) joystickMove(cv, m)
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    v.alpha = 1f
+                    cv.view.alpha = 1f
                     cv.pressed = false
                     if (cv.ignoreTouch) cv.ignoreTouch = false else onControlUp(cv)
                 }
             }
             true
         }
-    }
-
-    // ── Pass-through: a target placed on top of another control ignores that control ──
-
-    private val suspendCount = HashMap<ControlView, Int>()
-
-    private fun contains(c: ControlView, tx: Float, ty: Float): Boolean =
-        tx >= c.params.x && tx <= c.params.x + c.params.width &&
-            ty >= c.params.y && ty <= c.params.y + c.params.height
-
-    private fun targetInsideSelf(cv: ControlView): Boolean {
-        val ev = cv.event
-        if (ev.targetX < 0f || ev.targetY < 0f) return false
-        val s = screenSize()
-        return contains(cv, ev.targetX * s.x, ev.targetY * s.y)
-    }
-
-    private fun blockersOf(cv: ControlView): List<ControlView> {
-        val ev = cv.event
-        if (ev.targetX < 0f || ev.targetY < 0f) return emptyList()
-        val s = screenSize()
-        val tx = ev.targetX * s.x
-        val ty = ev.targetY * s.y
-        // A control that is being held right now is left alone (switching it off would cancel
-        // the user's own touch).
-        return controlViews.filter { it !== cv && !it.pressed && contains(it, tx, ty) }
-    }
-
-    private fun suspendControl(c: ControlView) {
-        val n = (suspendCount[c] ?: 0) + 1
-        suspendCount[c] = n
-        if (n == 1) {
-            c.params.flags = c.params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-            updateOverlay(c.view, c.params)
-        }
-    }
-
-    private fun resumeControl(c: ControlView) {
-        val n = (suspendCount[c] ?: 0) - 1
-        if (n <= 0) {
-            suspendCount.remove(c)
-            c.params.flags = c.params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-            updateOverlay(c.view, c.params)
-        } else {
-            suspendCount[c] = n
-        }
-    }
-
-    /**
-     * Controls sitting on [cv]'s target stop catching touches while [cv] is acting. Not needed
-     * (returns false) when Shizuku already delivers touches to the game only.
-     * Returns true when at least one window was switched off just now.
-     */
-    private fun suspendBlockers(cv: ControlView): Boolean {
-        handler.removeCallbacks(cv.releaseRunnable)
-        if (targetsGameOnly()) return false
-        if (cv.suspended.isNotEmpty()) return false
-        val list = blockersOf(cv)
-        cv.suspended = list
-        list.forEach { suspendControl(it) }
-        return list.isNotEmpty()
-    }
-
-    /** Runs [block] once the switched-off windows have really stopped catching touches. */
-    private fun afterSuspend(cv: ControlView, block: () -> Unit) {
-        if (suspendBlockers(cv)) handler.postDelayed({ block() }, 60L) else block()
-    }
-
-    private fun resumeBlockers(cv: ControlView) {
-        handler.removeCallbacks(cv.releaseRunnable)
-        val list = cv.suspended
-        cv.suspended = emptyList()
-        list.forEach { resumeControl(it) }
     }
 
     private fun resetKnob(cv: ControlView) {
@@ -1890,25 +1795,13 @@ class ClickerService : AccessibilityService() {
     private fun unlockMove(cv: ControlView) {
         cv.locked = false
         touch().up(cv)
-        resumeBlockers(cv)
         resetKnob(cv)
     }
 
     private fun onControlDown(cv: ControlView, m: MotionEvent) {
         val ev = cv.event
-        val isButton = ev.widget == ControlWidget.BUTTON
-        val longLived = !isButton || ev.action == ControlAction.HOLD ||
-            ev.action == ControlAction.TOGGLE || ev.action == ControlAction.SPAM ||
-            ev.action == ControlAction.HOLD_TOGGLE
-        val isSystem = isButton && (ev.action == ControlAction.BACK ||
-            ev.action == ControlAction.HOME || ev.action == ControlAction.RECENTS)
-        if (longLived && !isSystem && targetInsideSelf(cv)) {
-            toast(R.string.toast_target_on_self)
-            return
-        }
-        if (!isButton) {
+        if (ev.widget != ControlWidget.BUTTON) {
             val t = targetPx(ev) ?: return
-            suspendBlockers(cv)
             if (ev.widget == ControlWidget.CAMERA_JOYSTICK) {
                 startCamera(cv, t, m)
             } else {
@@ -1920,18 +1813,13 @@ class ClickerService : AccessibilityService() {
         when (ev.action) {
             ControlAction.CLICK -> {
                 val t = targetPx(ev)
-                if (t != null) {
-                    afterSuspend(cv) {
-                        tapAt(t[0], t[1])
-                        handler.postDelayed(cv.releaseRunnable, 160L)
-                    }
-                }
+                if (t != null) tapAt(t[0], t[1])
             }
             ControlAction.SPAM -> {
                 if (targetPx(ev) != null) {
                     cv.active = true
                     handler.removeCallbacks(cv.repeat)
-                    afterSuspend(cv) { if (cv.active) handler.post(cv.repeat) }
+                    handler.post(cv.repeat)
                 }
             }
             ControlAction.TOGGLE -> {
@@ -1939,31 +1827,27 @@ class ClickerService : AccessibilityService() {
                 if (cv.active) {
                     cv.active = false
                     handler.removeCallbacks(cv.repeat)
-                    resumeBlockers(cv)
                 } else if (targetPx(ev) != null) {
                     cv.active = true
                     handler.removeCallbacks(cv.repeat)
-                    afterSuspend(cv) { if (cv.active) handler.post(cv.repeat) }
+                    handler.post(cv.repeat)
                 }
                 cv.view.background = buttonBackground(ev, cv.active)
             }
             ControlAction.HOLD -> {
                 val t = targetPx(ev)
-                if (t != null) {
-                    afterSuspend(cv) { if (cv.pressed) touch().down(cv, t[0], t[1]) }
-                }
+                if (t != null) touch().down(cv, t[0], t[1])
             }
             ControlAction.HOLD_TOGGLE -> {
                 // Hold lock: press once to keep the target pressed, press again to release.
                 if (cv.active) {
                     cv.active = false
                     touch().up(cv)
-                    resumeBlockers(cv)
                 } else {
                     val t = targetPx(ev)
                     if (t != null) {
                         cv.active = true
-                        afterSuspend(cv) { if (cv.active) touch().down(cv, t[0], t[1]) }
+                        touch().down(cv, t[0], t[1])
                     }
                 }
                 cv.view.background = buttonBackground(ev, cv.active)
@@ -1985,7 +1869,6 @@ class ClickerService : AccessibilityService() {
                     return
                 }
                 touch().up(cv)
-                resumeBlockers(cv)
                 resetKnob(cv)
             }
             ControlWidget.CAMERA_JOYSTICK -> {
@@ -1994,7 +1877,6 @@ class ClickerService : AccessibilityService() {
                 cv.lookTicking = false
                 handler.removeCallbacks(cv.lookTick)
                 touch().up(cv.camKey)
-                resumeBlockers(cv)
                 resetKnob(cv)
                 cv.knob?.visibility = View.GONE
             }
@@ -2002,12 +1884,8 @@ class ClickerService : AccessibilityService() {
                 ControlAction.SPAM -> {
                     cv.active = false
                     handler.removeCallbacks(cv.repeat)
-                    resumeBlockers(cv)
                 }
-                ControlAction.HOLD -> {
-                    touch().up(cv)
-                    resumeBlockers(cv)
-                }
+                ControlAction.HOLD -> touch().up(cv)
                 else -> Unit
             }
         }
