@@ -6,12 +6,12 @@
     <string name="tagline">Smart auto clicker · Custom game controls · 100% offline</string>
     <string name="copyright">© 2026 Nostick. All rights reserved.</string>
     <string name="version_fmt">Version %s</string>
-    <string name="accessibility_description">NostickClicker uses the Accessibility API solely to simulate automated touch gestures at locations you choose. It does not read screen content, collect data, or connect to the internet.</string>
+    <string name="accessibility_description">NostickClicker uses the Accessibility API solely to simulate automated touch gestures at locations you choose. It does not read screen content, collect data, or connect to the internet. In the optional Shizuku mode it notes only the name of the foreground app.</string>
 
     <!-- Prominent disclosure -->
     <string name="disclosure_title">Before we begin</string>
     <string name="disclosure_section_what_title">🛡️ What NostickClicker uses</string>
-    <string name="disclosure_section_what_body">NostickClicker uses Android\'s AccessibilityService API exclusively to simulate taps and swipes at the positions you place on screen. This is the only mechanism that allows gesture injection on unrooted devices.</string>
+    <string name="disclosure_section_what_body">NostickClicker uses Android\'s AccessibilityService API exclusively to simulate taps and swipes at the positions you place on screen. This is the only mechanism that allows gesture injection on unrooted devices. In the optional Shizuku mode it also notes only the NAME of the app in the foreground (never its content) so touches reach that app alone.</string>
     <string name="disclosure_section_no_title">🔒 What we never do</string>
     <string name="disclosure_section_no_body">We never read, collect, store or share personal data, app content or screen information. We do not access your contacts, messages, files, location, camera or microphone. Nothing ever leaves your device.</string>
     <string name="disclosure_section_offline_title">📴 100% offline by design</string>
@@ -73,7 +73,7 @@
     <string name="widget_button">Button</string>
     <string name="widget_move">MOVE</string>
     <string name="widget_look">LOOK</string>
-    <string name="control_properties">Control settings</string>
+    <string name="control_properties">Click settings</string>
     <string name="control_label">Label</string>
     <string name="control_action">Action</string>
     <string name="control_system">System buttons</string>
@@ -142,4 +142,17 @@
     <string name="action_desc_recents">Android Recent apps button.</string>
     <string name="hint_move">Drag outside the circle and let go to lock walking. Tap the stick to unlock.</string>
     <string name="hint_look">Works like touching the game screen: your thumb\'s movement is copied to the game. Place the pad anywhere and put the green marker on the open part of the game screen where the camera drag should start.</string>
+
+    <!-- Appearance panel (tap a control) -->
+    <string name="appearance_title">Control look</string>
+    <string name="shape_label">Shape</string>
+    <string name="shape_rounded">Rounded</string>
+    <string name="shape_circle">Circle</string>
+    <string name="color_label">Color</string>
+    <string name="opacity_fmt">Opacity: %d%%</string>
+    <string name="appearance_hint">Tap the green marker to set what this control does: tap type, repeat speed and more.</string>
+    <!-- Shizuku: touches to the game only -->
+    <string name="shizuku_target_switch">Shizuku: send touches to the game only</string>
+    <string name="shizuku_target_desc">Lets a target sit under another control (for example a prone button under the move stick) without pressing that control. Needs Shizuku mode.</string>
+    <string name="toast_target_under_control">This target is under another control. Without Shizuku it works only while that control is not being held.</string>
 </resources>

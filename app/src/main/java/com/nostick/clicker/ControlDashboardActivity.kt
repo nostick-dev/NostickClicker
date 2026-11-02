@@ -17,6 +17,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import java.util.UUID
 
 /** Profiles screen: pick the active layout, create new ones, open the editor. */
@@ -95,6 +96,21 @@ class ControlDashboardActivity : AppCompatActivity() {
             Ui.lp(this, w = 0, h = Ui.dp(this, 48), weight = 1f)
         )
         card.addView(row, Ui.lp(this, top = 14))
+
+        val targetSwitch = SwitchCompat(this).apply {
+            text = getString(R.string.shizuku_target_switch)
+            setTextColor(Ui.TEXT)
+            isChecked = Prefs.isShizukuTargetGame(this@ControlDashboardActivity)
+            setOnCheckedChangeListener { _, checked ->
+                Prefs.setShizukuTargetGame(this@ControlDashboardActivity, checked)
+                ClickerService.instance?.refreshBackend()
+            }
+        }
+        card.addView(targetSwitch, Ui.lp(this, top = 16))
+        card.addView(
+            Ui.text(this, getString(R.string.shizuku_target_desc), 12f, Ui.MUTED),
+            Ui.lp(this, top = 4)
+        )
         content.addView(card, Ui.lp(this, top = 18))
 
         // ── Profiles ────────────────────────────────────────────────────────

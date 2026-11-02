@@ -19,11 +19,20 @@ enum class ControlAction { CLICK, HOLD, TOGGLE, SPAM, BACK, HOME, RECENTS, HOLD_
 
 enum class ControlWidget { BUTTON, MOVE_JOYSTICK, CAMERA_JOYSTICK }
 
+/** Look of a button. */
+object ControlShape {
+    const val ROUNDED = 0
+    const val CIRCLE = 1
+}
+
+val DEFAULT_CONTROL_COLOR: Int = 0xFF7C3AED.toInt()
+
 /**
  * x / y: top-left of the on-screen control, as a fraction of the screen.
  * width: control size in dp divided by 360.
  * targetX / targetY: centre of the point the control taps / drags, as a fraction
  * of the screen. Negative means "not set yet".
+ * shape / color / opacity: look of the control (opacity 0.1..1.0 = fill opacity).
  */
 data class ControlEvent(
     val id: Long,
@@ -40,7 +49,10 @@ data class ControlEvent(
     var intervalMs: Long = 120L,
     var enabled: Boolean = true,
     var targetX: Float = -1f,
-    var targetY: Float = -1f
+    var targetY: Float = -1f,
+    var shape: Int = ControlShape.ROUNDED,
+    var color: Int = DEFAULT_CONTROL_COLOR,
+    var opacity: Float = 0.8f
 )
 
 data class ControlProfile(

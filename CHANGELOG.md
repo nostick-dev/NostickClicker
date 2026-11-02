@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.3
+- **Control look menu**: tap a control in the layout editor to change how it LOOKS: shape
+  (rounded / circle), colour (10 presets), opacity (10–100 %, so it can be see-through like the
+  sticks), size and label, with a live preview. Sticks get opacity and size.
+- **Click settings menu**: tap the green marker to change what the control DOES: action (tap,
+  hold, spam, hold lock, auto spam, back / home / recents), repeat speed and stick sensitivity.
+- **Targets under other controls**: a green target can now sit on top of another control (for
+  example a prone button under the move stick) without pressing it.
+  - With Shizuku (new switch "send touches to the game only", on by default) touches are
+    delivered to the game's app only, so our own windows never see them and a held stick is
+    never cancelled. In this mode the app notes the name of the foreground app (not content).
+  - Without Shizuku the covered control is switched off for a moment while the button acts
+    (about 60 ms of delay) and a hint appears when a target is placed under another control.
+    A control that is being held at that moment cannot be switched off.
+- **Look pad edge turning**: inside the pad the camera copies your thumb 1:1. At the pad's edge
+  it keeps turning by itself (faster the further you push); moving back inwards stops it at once
+  and 1:1 control resumes without a jump.
+- **Look pad stutter**: the game finger is lifted only when it reaches the screen edge and is put
+  back as far behind as the screen allows. Shizuku moves are merged into one steady stream that
+  keeps the timing of your real touch.
+- **Move stick lock survives your own touches**: after Android interrupts the held finger it is
+  pressed again at the stick's base and slid back, so walking keeps its direction.
+
 ## 1.0.2
 - **Look pad**: the camera control is now a touch pad that behaves like touching the game
   screen directly. The game finger copies the movement of your thumb 1:1 (scaled by the

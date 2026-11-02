@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.os.Process
 import android.os.SystemClock
 import android.view.InputDevice
 import android.view.InputEvent
@@ -55,9 +56,13 @@ object ShizukuInput {
  */
 class ShizukuInjector : TouchInjector {
 
+    private companion object {
+        const val MIN_MOVE_GAP_MS = 6L
+    }
+
     private class Pt(val id: Int, var x: Float, var y: Float)
 
-    private val thread = HandlerThread("nostick-inject").also { it.start() }
+    private val thread = HandlerThread("nostick-inject", Process.THREAD_PRIORITY_URGENT_DISPLAY).also { it.start() }
     private val bg = Handler(thread.looper)
 
     // Main-thread side: which keys the app currently considers pressed.
@@ -66,11 +71,30 @@ class ShizukuInjector : TouchInjector {
     // Injection-thread side.
     private val pts = LinkedHashMap<Any, Pt>()
     private var downTime = 0L
+    private var lastEventTime = 0L
     private var tapCounter = 0
 
+    // Moves are merged: at most one ACTION_MOVE every few ms carrying the latest position of
+    // EVERY finger. Two sticks used at once then produce one steady event stream instead of
+    // two interleaved floods, which is what made fast camera turns stutter.
+    private var dirty = false
+    private var pendingTime = 0L
+    private var lastMoveSent = 0L
+    private val flushRunnable = Runnable { flushMove() }
+
     private var service: Any? = null
-    private var inject: Method? = null
-    private var injectArgs = 2
+    private var injectPlain: Method? = null
+    private var injectTarget: Method? = null
+
+    /**
+     * UID of the app that must receive the touches (the game in the foreground), or -1.
+     * With a target, our own overlay windows are skipped by the input system, so a control's
+     * target can sit under another control without that control ever seeing the touch.
+     */
+    @Volatile
+    var targetUid: Int = -1
+
+    fun hasTarget(): Boolean = targetUid > 0 && injectTarget != null
 
     /** Connects to the system input service through Shizuku. */
     fun prepare(): Boolean {
@@ -85,13 +109,17 @@ class ShizukuInjector : TouchInjector {
             val svc = asInterface.invoke(null, wrapped) ?: return false
             service = svc
             val intType = Int::class.javaPrimitiveType
-            inject = try {
-                injectArgs = 2
+            injectPlain = try {
                 svc.javaClass.getMethod("injectInputEvent", InputEvent::class.java, intType)
             } catch (e: NoSuchMethodException) {
-                injectArgs = 3
-                svc.javaClass.getMethod("injectInputEventToTarget", InputEvent::class.java, intType, intType)
+                null
             }
+            injectTarget = try {
+                svc.javaClass.getMethod("injectInputEventToTarget", InputEvent::class.java, intType, intType)
+            } catch (e: NoSuchMethodException) {
+                null
+            }
+            if (injectPlain == null && injectTarget == null) return false
             return true
         } catch (e: Throwable) {
             return false
@@ -105,14 +133,14 @@ class ShizukuInjector : TouchInjector {
 
     // ── TouchInjector ───────────────────────────────────────────────────────
 
-    override fun down(key: Any, x: Float, y: Float) {
+    override fun down(key: Any, x: Float, y: Float, restoreFromStart: Boolean) {
         held.add(key)
         bg.post { doDown(key, x, y) }
     }
 
-    override fun move(key: Any, x: Float, y: Float) {
+    override fun move(key: Any, x: Float, y: Float, timeMs: Long) {
         if (!held.contains(key)) return
-        bg.post { doMove(key, x, y) }
+        bg.post { doMove(key, x, y, timeMs) }
     }
 
     override fun up(key: Any) {
@@ -138,8 +166,23 @@ class ShizukuInjector : TouchInjector {
 
     // ── Injection thread ────────────────────────────────────────────────────
 
+    private fun flushPending() {
+        if (dirty) {
+            bg.removeCallbacks(flushRunnable)
+            flushMove()
+        }
+    }
+
+    private fun flushMove() {
+        dirty = false
+        if (pts.isEmpty()) return
+        send(MotionEvent.ACTION_MOVE, pendingTime)
+        lastMoveSent = SystemClock.uptimeMillis()
+    }
+
     private fun doDown(key: Any, x: Float, y: Float) {
         if (pts.containsKey(key) || pts.size >= 10) return
+        flushPending()
         val first = pts.isEmpty()
         if (first) downTime = SystemClock.uptimeMillis()
         val used = pts.values.map { it.id }.toSet()
@@ -153,16 +196,22 @@ class ShizukuInjector : TouchInjector {
         send(action)
     }
 
-    private fun doMove(key: Any, x: Float, y: Float) {
+    private fun doMove(key: Any, x: Float, y: Float, timeMs: Long) {
         val p = pts[key] ?: return
         if (p.x == x && p.y == y) return
         p.x = x
         p.y = y
-        send(MotionEvent.ACTION_MOVE)
+        if (timeMs > pendingTime) pendingTime = timeMs
+        if (!dirty) {
+            dirty = true
+            val wait = (MIN_MOVE_GAP_MS - (SystemClock.uptimeMillis() - lastMoveSent)).coerceAtLeast(0L)
+            bg.postDelayed(flushRunnable, wait)
+        }
     }
 
     private fun doUp(key: Any) {
         if (!pts.containsKey(key)) return
+        flushPending()
         val index = pts.keys.indexOf(key)
         val action = if (pts.size == 1) {
             MotionEvent.ACTION_UP
@@ -173,9 +222,9 @@ class ShizukuInjector : TouchInjector {
         pts.remove(key)
     }
 
-    private fun send(action: Int) {
-        val method = inject ?: return
+    private fun send(action: Int, timeMs: Long = 0L) {
         val svc = service ?: return
+        if (injectPlain == null && injectTarget == null) return
         val list = pts.values.toList()
         val n = list.size
         val props = Array(n) { i ->
@@ -192,13 +241,28 @@ class ShizukuInjector : TouchInjector {
                 it.size = 1f
             }
         }
-        val now = SystemClock.uptimeMillis()
+        // Keep the cadence of the real touch (its own timestamp) when we have it; never go
+        // backwards and never before the gesture's down time.
+        val uptime = SystemClock.uptimeMillis()
+        var now = if (timeMs in 1..uptime) timeMs else uptime
+        if (now < lastEventTime) now = lastEventTime
+        if (now < downTime) now = downTime
+        lastEventTime = now
         val event = MotionEvent.obtain(
             downTime, now, action, n, props, coords,
             0, 0, 1f, 1f, -1, 0, InputDevice.SOURCE_TOUCHSCREEN, 0
         )
         try {
-            if (injectArgs == 2) method.invoke(svc, event, 0) else method.invoke(svc, event, 0, -1)
+            val target = targetUid
+            val withTarget = injectTarget
+            val plain = injectPlain
+            if (target > 0 && withTarget != null) {
+                withTarget.invoke(svc, event, 0, target)
+            } else if (plain != null) {
+                plain.invoke(svc, event, 0)
+            } else {
+                withTarget?.invoke(svc, event, 0, -1)
+            }
         } catch (_: Throwable) {
         } finally {
             event.recycle()

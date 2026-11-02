@@ -14,11 +14,15 @@ package com.nostick.clicker
  *  • ShizukuInjector (optional): real multi-touch events, smooth and uninterrupted.
  */
 interface TouchInjector {
-    /** Puts a finger down at (x, y) and keeps it there until [up]. */
-    fun down(key: Any, x: Float, y: Float)
+    /**
+     * Puts a finger down at (x, y) and keeps it there until [up].
+     * [restoreFromStart]: if the system cancels the touch, press again at (x, y) and slide
+     * back to the current position (needed by joysticks, whose base is where you press).
+     */
+    fun down(key: Any, x: Float, y: Float, restoreFromStart: Boolean = false)
 
-    /** Slides a held finger to a new position. */
-    fun move(key: Any, x: Float, y: Float)
+    /** Slides a held finger to a new position. [timeMs] = uptime of the real event, if known. */
+    fun move(key: Any, x: Float, y: Float, timeMs: Long = 0L)
 
     /** Lifts a held finger. */
     fun up(key: Any)

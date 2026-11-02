@@ -26,12 +26,17 @@ import android.graphics.Color
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Point
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.provider.Settings
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.LayoutInflater
@@ -66,6 +71,7 @@ class ClickerService : AccessibilityService() {
             private set
 
         private const val STEP_MS = 30L
+        private val IGNORED_PACKAGES = setOf("com.android.systemui", "android")
         private const val MAX_POINTS = 20
         private const val WRAP = ViewGroup.LayoutParams.WRAP_CONTENT
         private const val MATCH = ViewGroup.LayoutParams.MATCH_PARENT
@@ -134,7 +140,59 @@ class ClickerService : AccessibilityService() {
     }
 
     /** Required by AccessibilityService; NostickClicker does not process events. */
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
+    /**
+     * Only used in the optional Shizuku mode: remembers the name of the app that is in the
+     * foreground (never its content) so injected touches can be delivered to that app alone.
+     */
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (!trackForeground || event == null) return
+        if (event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        val pkg = event.packageName?.toString() ?: return
+        if (pkg == packageName || pkg in IGNORED_PACKAGES || pkg == imePackage()) return
+        if (pkg == foregroundPkg) return
+        foregroundPkg = pkg
+        applyTargetUid()
+    }
+
+    private var foregroundPkg: String? = null
+    private var trackForeground = false
+
+    private fun imePackage(): String? = try {
+        Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)?.substringBefore('/')
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun applyTargetUid() {
+        val injector = shizukuInjector ?: return
+        val pkg = foregroundPkg
+        var uid = -1
+        if (trackForeground && pkg != null) {
+            uid = try {
+                packageManager.getPackageUid(pkg, 0)
+            } catch (e: Exception) {
+                -1
+            }
+        }
+        injector.targetUid = uid
+    }
+
+    private fun updateEventTracking() {
+        trackForeground = shizukuInjector != null && Prefs.isShizukuTargetGame(this)
+        try {
+            val info = serviceInfo
+            if (info != null) {
+                info.eventTypes = if (trackForeground) AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED else 0
+                serviceInfo = info
+            }
+        } catch (_: Exception) {
+        }
+        if (!trackForeground) foregroundPkg = null
+        applyTargetUid()
+    }
+
+    /** True when Shizuku delivers touches to the game only (our own windows are skipped). */
+    private fun targetsGameOnly(): Boolean = shizukuInjector?.hasTarget() == true
 
     override fun onInterrupt() {
         stopClicking()
@@ -142,6 +200,7 @@ class ClickerService : AccessibilityService() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        screenCache = null
         // Rotation changes the screen size: rebuild everything that depends on it.
         handler.post { rebuildAfterRotation() }
     }
@@ -234,7 +293,10 @@ class ClickerService : AccessibilityService() {
 
     private fun dp(v: Int): Int = Ui.dp(this, v)
 
+    private var screenCache: Point? = null
+
     private fun screenSize(): Point {
+        screenCache?.let { return it }
         val p = Point()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val b = wm.maximumWindowMetrics.bounds
@@ -243,6 +305,7 @@ class ClickerService : AccessibilityService() {
             @Suppress("DEPRECATION")
             wm.defaultDisplay.getRealSize(p)
         }
+        screenCache = p
         return p
     }
 
@@ -407,20 +470,26 @@ class ClickerService : AccessibilityService() {
             var stroke: GestureDescription.StrokeDescription? = null
             var lastX = x
             var lastY = y
+            val homeX = x
+            val homeY = y
+            var restore = false
         }
 
         private val fingers = LinkedHashMap<Any, Finger>()
         private var busy = false
         private var tapCounter = 0L
+        private var cancelStreak = 0
 
         /** Puts a finger down at (x, y) and keeps it there until [up]. */
-        override fun down(key: Any, x: Float, y: Float) {
-            fingers[key] = Finger(key, x, y, false)
+        override fun down(key: Any, x: Float, y: Float, restoreFromStart: Boolean) {
+            val f = Finger(key, x, y, false)
+            f.restore = restoreFromStart
+            fingers[key] = f
             pump()
         }
 
         /** Slides a held finger to a new position. */
-        override fun move(key: Any, x: Float, y: Float) {
+        override fun move(key: Any, x: Float, y: Float, timeMs: Long) {
             val f = fingers[key] ?: return
             f.x = x
             f.y = y
@@ -490,6 +559,7 @@ class ClickerService : AccessibilityService() {
             val callback = object : AccessibilityService.GestureResultCallback() {
                 override fun onCompleted(gestureDescription: GestureDescription?) {
                     busy = false
+                    cancelStreak = 0
                     ended.forEach { fingers.remove(it) }
                     if (fingers.isNotEmpty()) step()
                 }
@@ -497,10 +567,20 @@ class ClickerService : AccessibilityService() {
                 override fun onCancelled(gestureDescription: GestureDescription?) {
                     busy = false
                     ended.forEach { fingers.remove(it) }
-                    // Something (another touch, the system) interrupted us: fingers that are
-                    // still held start a fresh stroke from their last position and carry on.
-                    fingers.values.forEach { it.stroke = null }
-                    if (fingers.isNotEmpty()) handler.postDelayed({ if (!busy) step() }, 40L)
+                    // Something (usually the user touching the screen) interrupted us. Fingers
+                    // that are still held start a fresh stroke and carry on. A joystick finger
+                    // is pressed again at its base and slid back to where it was, so the game
+                    // keeps the same direction instead of restarting from the wrong point.
+                    fingers.values.forEach {
+                        it.stroke = null
+                        if (it.restore) {
+                            it.lastX = it.homeX
+                            it.lastY = it.homeY
+                        }
+                    }
+                    cancelStreak++
+                    val wait = (40L * cancelStreak).coerceAtMost(120L)
+                    if (fingers.isNotEmpty()) handler.postDelayed({ if (!busy) step() }, wait)
                 }
             }
             val ok = try {
@@ -534,6 +614,7 @@ class ClickerService : AccessibilityService() {
                 toast(R.string.toast_shizuku_failed)
             }
         }
+        updateEventTracking()
     }
 
     private fun tapAt(x: Float, y: Float) {
@@ -1121,7 +1202,164 @@ class ClickerService : AccessibilityService() {
         ControlAction.RECENTS -> R.string.action_desc_recents
     }
 
-    private fun showControlPanel(cv: ControlView) {
+    /** Tap on a control: how it LOOKS (shape, colour, transparency, size, label). */
+    private fun showAppearancePanel(cv: ControlView) {
+        val ev = cv.event
+        val isButton = ev.widget == ControlWidget.BUTTON
+        var shape = ev.shape
+        var color = ev.color
+
+        val card = Ui.card(this).apply { isClickable = true }
+        card.addView(Ui.text(this, getString(R.string.appearance_title), 18f, Ui.TEXT, true))
+
+        val labelInput = Ui.input(this, getString(R.string.control_label), ev.label)
+        val preview = Ui.text(this, ev.label, 12f, Color.WHITE, true)
+        preview.gravity = Gravity.CENTER
+        preview.maxLines = 2
+        val previewBox = FrameLayout(this)
+        previewBox.background = Ui.rounded(this, 0xFF2A2A3A.toInt(), 14)
+        previewBox.addView(preview, FrameLayout.LayoutParams(dp(96), dp(60), Gravity.CENTER))
+
+        val opacityLabel = Ui.text(this, "", 13f, Ui.MUTED)
+        val opacitySeek = SeekBar(this)
+        Ui.styleSeekBar(opacitySeek)
+        opacitySeek.max = 90
+        opacitySeek.progress = (ev.opacity * 100f).roundToInt().coerceIn(10, 100) - 10
+
+        val shapeChips = mutableListOf<Pair<Int, TextView>>()
+        val swatches = mutableListOf<Pair<Int, View>>()
+
+        fun refreshPreview() {
+            val temp = ev.copy(shape = shape, color = color, opacity = (opacitySeek.progress + 10) / 100f)
+            preview.background = buttonBackground(temp, false)
+            preview.setTextColor(textColorFor(temp))
+            preview.text = labelInput.text.toString().ifBlank { ev.label }
+            val box = preview.layoutParams as FrameLayout.LayoutParams
+            box.width = if (shape == ControlShape.CIRCLE) dp(64) else dp(96)
+            box.height = if (shape == ControlShape.CIRCLE) dp(64) else dp(60)
+            preview.layoutParams = box
+            opacityLabel.text = getString(R.string.opacity_fmt, opacitySeek.progress + 10)
+            shapeChips.forEach { (v, tv) -> Ui.styleChip(tv, v == shape) }
+            swatches.forEach { (c, view) ->
+                view.background = if (c == color) Ui.oval(c, Color.WHITE, dp(3)) else Ui.oval(c, 0x55FFFFFF, dp(1))
+            }
+        }
+
+        opacitySeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) = refreshPreview()
+            override fun onStartTrackingTouch(bar: SeekBar) = Unit
+            override fun onStopTrackingTouch(bar: SeekBar) = Unit
+        })
+        labelInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) = refreshPreview()
+        })
+
+        if (isButton) {
+            card.addView(previewBox, Ui.lp(this, h = dp(84), top = 12))
+            card.addView(Ui.text(this, getString(R.string.control_label), 13f, Ui.MUTED), Ui.lp(this, top = 12, bottom = 6))
+            card.addView(labelInput)
+
+            card.addView(Ui.text(this, getString(R.string.shape_label), 13f, Ui.MUTED), Ui.lp(this, top = 12, bottom = 6))
+            val shapeRow = LinearLayout(this)
+            listOf(ControlShape.ROUNDED to R.string.shape_rounded, ControlShape.CIRCLE to R.string.shape_circle)
+                .forEach { (value, label) ->
+                    val chip = Ui.chip(this, getString(label), value == shape, 4) {
+                        shape = value
+                        refreshPreview()
+                    }
+                    shapeChips.add(value to chip)
+                    shapeRow.addView(chip, Ui.lp(this, w = 0, weight = 1f, end = 6))
+                }
+            card.addView(shapeRow)
+
+            card.addView(Ui.text(this, getString(R.string.color_label), 13f, Ui.MUTED), Ui.lp(this, top = 12, bottom = 6))
+            val palette = intArrayOf(
+                0xFF7C3AED.toInt(), 0xFF2563EB.toInt(), 0xFF06B6D4.toInt(), 0xFF10B981.toInt(), 0xFFF59E0B.toInt(),
+                0xFFEF4444.toInt(), 0xFFEC4899.toInt(), 0xFFF3F4F6.toInt(), 0xFF6B7280.toInt(), 0xFF111827.toInt()
+            )
+            fun swatchRow(from: Int): LinearLayout {
+                val row = LinearLayout(this)
+                for (i in from until from + 5) {
+                    val c = palette[i]
+                    val sw = View(this)
+                    sw.setOnClickListener {
+                        color = c
+                        refreshPreview()
+                    }
+                    swatches.add(c to sw)
+                    row.addView(sw, Ui.lp(this, w = dp(36), h = dp(36), end = 12))
+                }
+                return row
+            }
+            card.addView(swatchRow(0))
+            card.addView(swatchRow(5), Ui.lp(this, top = 8))
+        }
+
+        card.addView(opacityLabel, Ui.lp(this, top = 12, bottom = 4))
+        card.addView(opacitySeek)
+
+        val sizeLabel = Ui.text(this, "", 13f, Ui.MUTED)
+        val sizeSeek = SeekBar(this)
+        Ui.styleSeekBar(sizeSeek)
+        val minSize = if (ev.widget == ControlWidget.CAMERA_JOYSTICK) 80 else 48
+        val maxSize = if (ev.widget == ControlWidget.CAMERA_JOYSTICK) 320 else 200
+        sizeSeek.max = maxSize - minSize
+        sizeSeek.progress = (ev.width * 360f).roundToInt().coerceIn(minSize, maxSize) - minSize
+        fun refreshSize() {
+            sizeLabel.text = getString(R.string.control_size_fmt, sizeSeek.progress + minSize)
+        }
+        sizeSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) = refreshSize()
+            override fun onStartTrackingTouch(bar: SeekBar) = Unit
+            override fun onStopTrackingTouch(bar: SeekBar) = Unit
+        })
+        refreshSize()
+        card.addView(sizeLabel, Ui.lp(this, top = 12, bottom = 4))
+        card.addView(sizeSeek)
+
+        card.addView(
+            Ui.text(this, getString(R.string.appearance_hint), 12f, Ui.ACCENT),
+            Ui.lp(this, top = 14)
+        )
+
+        val actions = LinearLayout(this)
+        actions.addView(
+            Ui.button(this, getString(android.R.string.cancel), Ui.SECONDARY) { closePanel() },
+            Ui.lp(this, w = 0, h = dp(48), weight = 1f, end = 8)
+        )
+        actions.addView(
+            Ui.button(this, getString(R.string.settings_ok), Ui.PRIMARY) {
+                if (isButton) {
+                    ev.label = labelInput.text.toString().trim().ifBlank { ev.label }
+                    ev.shape = shape
+                    ev.color = color
+                }
+                ev.opacity = (opacitySeek.progress + 10) / 100f
+                ev.width = (sizeSeek.progress + minSize) / 360f
+                ev.height = ev.width * 0.75f
+                closePanel()
+                rebuildControls()
+            },
+            Ui.lp(this, w = 0, h = dp(48), weight = 1f)
+        )
+        card.addView(actions, Ui.lp(this, top = 16))
+        card.addView(
+            Ui.button(this, getString(R.string.control_delete), Ui.DANGER_KIND) {
+                activeProfile?.controls?.remove(ev)
+                closePanel()
+                rebuildControls()
+            },
+            Ui.lp(this, h = dp(44), top = 8)
+        )
+
+        refreshPreview()
+        showPanel(card, true)
+    }
+
+    /** Tap on the green marker: what the control DOES (action, repeat speed, sensitivity). */
+    private fun showBehaviorPanel(cv: ControlView) {
         val ev = cv.event
         val isButton = ev.widget == ControlWidget.BUTTON
         var action = ev.action
@@ -1129,7 +1367,6 @@ class ClickerService : AccessibilityService() {
         val card = Ui.card(this).apply { isClickable = true }
         card.addView(Ui.text(this, getString(R.string.control_properties), 18f, Ui.TEXT, true))
 
-        val labelInput = Ui.input(this, getString(R.string.control_label), ev.label)
         val intervalInput = Ui.input(this, getString(R.string.control_interval), ev.intervalMs.toString(), true)
 
         val chipMap = mutableMapOf<ControlAction, TextView>()
@@ -1153,8 +1390,6 @@ class ClickerService : AccessibilityService() {
         }
 
         if (isButton) {
-            card.addView(Ui.text(this, getString(R.string.control_label), 13f, Ui.MUTED), Ui.lp(this, top = 12, bottom = 6))
-            card.addView(labelInput)
             card.addView(Ui.text(this, getString(R.string.control_action), 13f, Ui.MUTED), Ui.lp(this, top = 12, bottom = 6))
             card.addView(chipRow(listOf(ControlAction.CLICK, ControlAction.HOLD, ControlAction.SPAM)))
             card.addView(chipRow(listOf(ControlAction.HOLD_TOGGLE, ControlAction.TOGGLE)), Ui.lp(this, top = 6))
@@ -1165,25 +1400,6 @@ class ClickerService : AccessibilityService() {
             card.addView(Ui.text(this, getString(R.string.control_interval), 13f, Ui.MUTED), Ui.lp(this, top = 12, bottom = 6))
             card.addView(intervalInput)
         }
-
-        val sizeLabel = Ui.text(this, "", 13f, Ui.MUTED)
-        val sizeSeek = SeekBar(this)
-        Ui.styleSeekBar(sizeSeek)
-        val minSize = if (ev.widget == ControlWidget.CAMERA_JOYSTICK) 80 else 48
-        val maxSize = if (ev.widget == ControlWidget.CAMERA_JOYSTICK) 320 else 200
-        sizeSeek.max = maxSize - minSize
-        sizeSeek.progress = (ev.width * 360f).roundToInt().coerceIn(minSize, maxSize) - minSize
-        fun refreshSize() {
-            sizeLabel.text = getString(R.string.control_size_fmt, sizeSeek.progress + minSize)
-        }
-        sizeSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) = refreshSize()
-            override fun onStartTrackingTouch(bar: SeekBar) = Unit
-            override fun onStopTrackingTouch(bar: SeekBar) = Unit
-        })
-        refreshSize()
-        card.addView(sizeLabel, Ui.lp(this, top = 12, bottom = 4))
-        card.addView(sizeSeek)
 
         val sensLabel = Ui.text(this, "", 13f, Ui.MUTED)
         val sensSeek = SeekBar(this)
@@ -1225,14 +1441,11 @@ class ClickerService : AccessibilityService() {
         actions.addView(
             Ui.button(this, getString(R.string.settings_ok), Ui.PRIMARY) {
                 if (isButton) {
-                    ev.label = labelInput.text.toString().trim().ifBlank { ev.label }
                     ev.action = action
                     ev.intervalMs = intervalInput.text.toString().toLongOrNull()?.coerceIn(40L, 10000L) ?: ev.intervalMs
                 } else {
                     ev.sensitivity = 0.5f + sensSeek.progress / 10f
                 }
-                ev.width = (sizeSeek.progress + minSize) / 360f
-                ev.height = ev.width * 0.75f
                 closePanel()
                 rebuildControls()
             },
@@ -1265,6 +1478,7 @@ class ClickerService : AccessibilityService() {
         var marker: View? = null
         var markerParams: WindowManager.LayoutParams? = null
         var active = false
+        var pressed = false
         var suspended: List<ControlView> = emptyList()
         val releaseRunnable = Runnable { resumeBlockers(this@ControlView) }
 
@@ -1279,6 +1493,14 @@ class ClickerService : AccessibilityService() {
         var camStartY = 0f
         var camPosX = 0f
         var camPosY = 0f
+        var edgeArmed = false
+        var lookVx = 0f
+        var lookVy = 0f
+        var lookLast = 0L
+        var lookTicking = false
+        val lookTick = Runnable { lookStep(this@ControlView) }
+        var camAnchorX = 0f
+        var camAnchorY = 0f
         var lastRawX = 0f
         var lastRawY = 0f
 
@@ -1295,6 +1517,7 @@ class ClickerService : AccessibilityService() {
             active = false
             locked = false
             handler.removeCallbacks(repeat)
+            handler.removeCallbacks(lookTick)
             touch().up(this)
             touch().up(camKey)
             resumeBlockers(this)
@@ -1336,14 +1559,25 @@ class ClickerService : AccessibilityService() {
         }
     }
 
-    private fun controlBackground(active: Boolean) =
-        Ui.rounded(
-            this,
-            if (active) 0xEE059669.toInt() else 0xCC7C3AED.toInt(),
-            16,
-            if (editorMode) Color.WHITE else 0x66FFFFFF,
-            1
-        )
+    private fun withAlpha(color: Int, alpha: Float): Int =
+        (color and 0x00FFFFFF) or ((alpha.coerceIn(0f, 1f) * 255f).roundToInt() shl 24)
+
+    /** Black text on light buttons, white text otherwise. */
+    private fun textColorFor(ev: ControlEvent): Int {
+        val lum = 0.299 * Color.red(ev.color) + 0.587 * Color.green(ev.color) + 0.114 * Color.blue(ev.color)
+        return if (lum > 170 && ev.opacity > 0.55f) Color.BLACK else Color.WHITE
+    }
+
+    private fun buttonBackground(ev: ControlEvent, active: Boolean): GradientDrawable {
+        val base = if (active) 0xFF059669.toInt() else ev.color
+        val fill = withAlpha(base, ev.opacity)
+        val stroke = if (editorMode) Color.WHITE else 0x88FFFFFF.toInt()
+        return if (ev.shape == ControlShape.CIRCLE) {
+            Ui.oval(fill, stroke, dp(1))
+        } else {
+            Ui.rounded(this, fill, 16, stroke, 1)
+        }
+    }
 
     private fun addControlView(ev: ControlEvent, index: Int, screen: Point) {
         val isButton = ev.widget == ControlWidget.BUTTON
@@ -1351,7 +1585,7 @@ class ClickerService : AccessibilityService() {
         val sizeDp = (ev.width * 360f).coerceIn(if (isCamera) 80f else 48f, if (isCamera) 320f else 200f)
         val wPx = dp((if (isCamera) sizeDp * 1.3f else sizeDp).roundToInt())
         val hPx = when {
-            isButton -> dp((sizeDp * 0.75f).coerceAtLeast(44f).roundToInt())
+            isButton -> if (ev.shape == ControlShape.CIRCLE) wPx else dp((sizeDp * 0.75f).coerceAtLeast(44f).roundToInt())
             isCamera -> dp(sizeDp.roundToInt())
             else -> wPx
         }
@@ -1359,16 +1593,16 @@ class ClickerService : AccessibilityService() {
         var knob: View? = null
         var lock: View? = null
         val view: View = if (isButton) {
-            Ui.text(this, if (editorMode) "$index · ${ev.label}" else ev.label, 12f, Color.WHITE, true).apply {
+            Ui.text(this, if (editorMode) "$index · ${ev.label}" else ev.label, 12f, textColorFor(ev), true).apply {
                 gravity = Gravity.CENTER
                 maxLines = 2
                 setPadding(dp(4), dp(2), dp(4), dp(2))
-                background = controlBackground(false)
+                background = buttonBackground(ev, false)
             }
         } else if (isCamera) {
             // Look pad: a touch area. A small dot follows the thumb while it is down.
             val frame = FrameLayout(this)
-            frame.background = Ui.rounded(this, 0x44000000, 18, 0x88FFFFFF.toInt(), 2)
+            frame.background = Ui.rounded(this, withAlpha(Color.BLACK, ev.opacity * 0.4f), 18, 0x88FFFFFF.toInt(), 2)
             val dot = View(this)
             dot.background = Ui.oval(0xFFF2F2F2.toInt(), 0xFFB5B5B5.toInt(), dp(1))
             dot.visibility = if (editorMode) View.VISIBLE else View.GONE
@@ -1383,7 +1617,7 @@ class ClickerService : AccessibilityService() {
         } else {
             // Classic joystick: dark translucent base, neutral white thumb.
             val frame = FrameLayout(this)
-            frame.background = Ui.oval(0x55000000, 0x99FFFFFF.toInt(), dp(2))
+            frame.background = Ui.oval(withAlpha(Color.BLACK, ev.opacity * 0.42f), 0x99FFFFFF.toInt(), dp(2))
             val knobSize = (wPx * 0.42f).roundToInt()
             val k = View(this)
             k.background = Ui.oval(0xFFF2F2F2.toInt(), 0xFFB5B5B5.toInt(), dp(2))
@@ -1454,6 +1688,7 @@ class ClickerService : AccessibilityService() {
         var downY = 0f
         var startX = 0
         var startY = 0
+        var moved = false
         marker.setOnTouchListener { _, m ->
             when (m.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -1461,21 +1696,40 @@ class ClickerService : AccessibilityService() {
                     downY = m.rawY
                     startX = mp.x
                     startY = mp.y
+                    moved = false
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    mp.x = (startX + m.rawX - downX).roundToInt()
-                    mp.y = (startY + m.rawY - downY).roundToInt()
-                    clampParams(marker, mp)
-                    updateOverlay(marker, mp)
+                    val dx = m.rawX - downX
+                    val dy = m.rawY - downY
+                    if (!moved && (abs(dx) > touchSlop || abs(dy) > touchSlop)) moved = true
+                    if (moved) {
+                        mp.x = (startX + dx).roundToInt()
+                        mp.y = (startY + dy).roundToInt()
+                        clampParams(marker, mp)
+                        updateOverlay(marker, mp)
+                    }
                 }
                 MotionEvent.ACTION_UP -> {
-                    val s = screenSize()
-                    ev.targetX = (mp.x + size / 2f) / s.x
-                    ev.targetY = (mp.y + size / 2f) / s.y
-                    val longLived = ev.widget != ControlWidget.BUTTON ||
-                        ev.action == ControlAction.HOLD || ev.action == ControlAction.TOGGLE ||
-                        ev.action == ControlAction.SPAM || ev.action == ControlAction.HOLD_TOGGLE
-                    if (longLived && targetInsideSelf(cv)) toast(R.string.toast_target_on_self)
+                    if (!moved) {
+                        // A tap on the green marker opens the click settings.
+                        showBehaviorPanel(cv)
+                    } else {
+                        val s = screenSize()
+                        ev.targetX = (mp.x + size / 2f) / s.x
+                        ev.targetY = (mp.y + size / 2f) / s.y
+                        val longLived = ev.widget != ControlWidget.BUTTON ||
+                            ev.action == ControlAction.HOLD || ev.action == ControlAction.TOGGLE ||
+                            ev.action == ControlAction.SPAM || ev.action == ControlAction.HOLD_TOGGLE
+                        if (longLived && targetInsideSelf(cv)) {
+                            toast(R.string.toast_target_on_self)
+                        } else if (!targetsGameOnly()) {
+                            val tx = ev.targetX * s.x
+                            val ty = ev.targetY * s.y
+                            if (controlViews.any { it !== cv && contains(it, tx, ty) }) {
+                                toast(R.string.toast_target_under_control)
+                            }
+                        }
+                    }
                 }
             }
             true
@@ -1514,7 +1768,7 @@ class ClickerService : AccessibilityService() {
                     val s = screenSize()
                     cv.event.x = p.x / s.x.toFloat()
                     cv.event.y = p.y / s.y.toFloat()
-                    if (!moved) showControlPanel(cv)
+                    if (!moved) showAppearancePanel(cv)
                 }
             }
             true
@@ -1528,6 +1782,7 @@ class ClickerService : AccessibilityService() {
             when (m.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     v.alpha = 0.7f
+                    cv.pressed = true
                     if (cv.locked) {
                         // A tap on a locked stick releases it.
                         unlockMove(cv)
@@ -1542,6 +1797,7 @@ class ClickerService : AccessibilityService() {
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     v.alpha = 1f
+                    cv.pressed = false
                     if (cv.ignoreTouch) cv.ignoreTouch = false else onControlUp(cv)
                 }
             }
@@ -1570,7 +1826,9 @@ class ClickerService : AccessibilityService() {
         val s = screenSize()
         val tx = ev.targetX * s.x
         val ty = ev.targetY * s.y
-        return controlViews.filter { it !== cv && contains(it, tx, ty) }
+        // A control that is being held right now is left alone (switching it off would cancel
+        // the user's own touch).
+        return controlViews.filter { it !== cv && !it.pressed && contains(it, tx, ty) }
     }
 
     private fun suspendControl(c: ControlView) {
@@ -1593,13 +1851,24 @@ class ClickerService : AccessibilityService() {
         }
     }
 
-    /** Controls sitting on [cv]'s target stop catching touches while [cv] is acting. */
-    private fun suspendBlockers(cv: ControlView) {
+    /**
+     * Controls sitting on [cv]'s target stop catching touches while [cv] is acting. Not needed
+     * (returns false) when Shizuku already delivers touches to the game only.
+     * Returns true when at least one window was switched off just now.
+     */
+    private fun suspendBlockers(cv: ControlView): Boolean {
         handler.removeCallbacks(cv.releaseRunnable)
-        if (cv.suspended.isNotEmpty()) return
+        if (targetsGameOnly()) return false
+        if (cv.suspended.isNotEmpty()) return false
         val list = blockersOf(cv)
         cv.suspended = list
         list.forEach { suspendControl(it) }
+        return list.isNotEmpty()
+    }
+
+    /** Runs [block] once the switched-off windows have really stopped catching touches. */
+    private fun afterSuspend(cv: ControlView, block: () -> Unit) {
+        if (suspendBlockers(cv)) handler.postDelayed({ block() }, 60L) else block()
     }
 
     private fun resumeBlockers(cv: ControlView) {
@@ -1643,7 +1912,7 @@ class ClickerService : AccessibilityService() {
             if (ev.widget == ControlWidget.CAMERA_JOYSTICK) {
                 startCamera(cv, t, m)
             } else {
-                touch().down(cv, t[0], t[1])
+                touch().down(cv, t[0], t[1], true)
                 joystickMove(cv, m)
             }
             return
@@ -1652,17 +1921,17 @@ class ClickerService : AccessibilityService() {
             ControlAction.CLICK -> {
                 val t = targetPx(ev)
                 if (t != null) {
-                    suspendBlockers(cv)
-                    tapAt(t[0], t[1])
-                    handler.postDelayed(cv.releaseRunnable, 160L)
+                    afterSuspend(cv) {
+                        tapAt(t[0], t[1])
+                        handler.postDelayed(cv.releaseRunnable, 160L)
+                    }
                 }
             }
             ControlAction.SPAM -> {
                 if (targetPx(ev) != null) {
-                    suspendBlockers(cv)
                     cv.active = true
                     handler.removeCallbacks(cv.repeat)
-                    handler.post(cv.repeat)
+                    afterSuspend(cv) { if (cv.active) handler.post(cv.repeat) }
                 }
             }
             ControlAction.TOGGLE -> {
@@ -1672,18 +1941,16 @@ class ClickerService : AccessibilityService() {
                     handler.removeCallbacks(cv.repeat)
                     resumeBlockers(cv)
                 } else if (targetPx(ev) != null) {
-                    suspendBlockers(cv)
                     cv.active = true
                     handler.removeCallbacks(cv.repeat)
-                    handler.post(cv.repeat)
+                    afterSuspend(cv) { if (cv.active) handler.post(cv.repeat) }
                 }
-                cv.view.background = controlBackground(cv.active)
+                cv.view.background = buttonBackground(ev, cv.active)
             }
             ControlAction.HOLD -> {
                 val t = targetPx(ev)
                 if (t != null) {
-                    suspendBlockers(cv)
-                    touch().down(cv, t[0], t[1])
+                    afterSuspend(cv) { if (cv.pressed) touch().down(cv, t[0], t[1]) }
                 }
             }
             ControlAction.HOLD_TOGGLE -> {
@@ -1695,12 +1962,11 @@ class ClickerService : AccessibilityService() {
                 } else {
                     val t = targetPx(ev)
                     if (t != null) {
-                        suspendBlockers(cv)
                         cv.active = true
-                        touch().down(cv, t[0], t[1])
+                        afterSuspend(cv) { if (cv.active) touch().down(cv, t[0], t[1]) }
                     }
                 }
-                cv.view.background = controlBackground(cv.active)
+                cv.view.background = buttonBackground(ev, cv.active)
             }
             ControlAction.BACK -> performGlobalAction(GLOBAL_ACTION_BACK)
             ControlAction.HOME -> performGlobalAction(GLOBAL_ACTION_HOME)
@@ -1723,6 +1989,10 @@ class ClickerService : AccessibilityService() {
                 resetKnob(cv)
             }
             ControlWidget.CAMERA_JOYSTICK -> {
+                cv.lookVx = 0f
+                cv.lookVy = 0f
+                cv.lookTicking = false
+                handler.removeCallbacks(cv.lookTick)
                 touch().up(cv.camKey)
                 resumeBlockers(cv)
                 resetKnob(cv)
@@ -1754,8 +2024,14 @@ class ClickerService : AccessibilityService() {
         cv.camStartY = t[1]
         cv.camPosX = t[0]
         cv.camPosY = t[1]
+        cv.camAnchorX = t[0]
+        cv.camAnchorY = t[1]
         cv.lastRawX = m.rawX
         cv.lastRawY = m.rawY
+        cv.lookVx = 0f
+        cv.lookVy = 0f
+        cv.lookTicking = false
+        cv.edgeArmed = !thumbInEdgeZone(cv, m)
         cv.camKey = Any()
         touch().down(cv.camKey, t[0], t[1])
         cv.knob?.visibility = View.VISIBLE
@@ -1773,40 +2049,121 @@ class ClickerService : AccessibilityService() {
         }
     }
 
+    /** Distance from (px, py) to the screen edge (minus [margin]) walking along (ux, uy). */
+    private fun roomAlong(px: Float, py: Float, ux: Float, uy: Float, s: Point, margin: Float): Float {
+        var room = Float.MAX_VALUE
+        if (ux > 0.0001f) room = min(room, (s.x - margin - px) / ux)
+        else if (ux < -0.0001f) room = min(room, (margin - px) / ux)
+        if (uy > 0.0001f) room = min(room, (s.y - margin - py) / uy)
+        else if (uy < -0.0001f) room = min(room, (margin - py) / uy)
+        return room.coerceAtLeast(0f)
+    }
+
+    /** True while the thumb is within the border band of the pad, or beyond it. */
+    private fun thumbInEdgeZone(cv: ControlView, m: MotionEvent): Boolean {
+        val loc = IntArray(2)
+        cv.view.getLocationOnScreen(loc)
+        val zone = dp(14).toFloat()
+        return m.rawX <= loc[0] + zone || m.rawX >= loc[0] + cv.view.width - zone ||
+            m.rawY <= loc[1] + zone || m.rawY >= loc[1] + cv.view.height - zone
+    }
+
+    /**
+     * Moves the game finger to (nx, ny). It is lifted ONLY when it reaches the screen edge,
+     * and is then put back as far behind the start point as the screen allows.
+     */
+    private fun applyLook(cv: ControlView, nx: Float, ny: Float, timeMs: Long) {
+        val s = screenSize()
+        val margin = dp(6).toFloat()
+        val atEdge = nx < margin || nx > s.x - margin || ny < margin || ny > s.y - margin
+        if (!atEdge) {
+            cv.camPosX = nx
+            cv.camPosY = ny
+            touch().move(cv.camKey, nx, ny, timeMs)
+            return
+        }
+        val ox = nx - cv.camAnchorX
+        val oy = ny - cv.camAnchorY
+        val len = hypot(ox, oy)
+        var wx = cv.camStartX
+        var wy = cv.camStartY
+        if (len > 0f) {
+            val ux = ox / len
+            val uy = oy / len
+            val back = roomAlong(cv.camStartX, cv.camStartY, -ux, -uy, s, margin * 2)
+            wx = cv.camStartX - ux * back * 0.85f
+            wy = cv.camStartY - uy * back * 0.85f
+        }
+        touch().up(cv.camKey)
+        cv.camKey = Any()
+        cv.camPosX = wx
+        cv.camPosY = wy
+        cv.camAnchorX = wx
+        cv.camAnchorY = wy
+        touch().down(cv.camKey, wx, wy)
+    }
+
+    /**
+     * Look pad. Inside the pad it behaves like touching the game screen: the game finger
+     * copies the thumb 1:1 (times the sensitivity). When the thumb reaches an edge of the pad
+     * and cannot move further, the camera keeps turning in that direction by itself (faster the
+     * further the thumb is pushed past the edge). Moving back inwards stops it at once and the
+     * 1:1 movement continues from exactly where you are, with no jump.
+     */
     private fun lookMove(cv: ControlView, m: MotionEvent) {
         if (!touch().isDown(cv.camKey)) return
         val gain = cv.event.sensitivity
-        val nx = cv.camPosX + (m.rawX - cv.lastRawX) * gain
-        val ny = cv.camPosY + (m.rawY - cv.lastRawY) * gain
+        var dxRaw = m.rawX - cv.lastRawX
+        var dyRaw = m.rawY - cv.lastRawY
         cv.lastRawX = m.rawX
         cv.lastRawY = m.rawY
         moveLookDot(cv, m)
 
-        val s = screenSize()
-        val reach = min(s.x, s.y) * 0.35f
-        val margin = dp(8).toFloat()
-        val ox = nx - cv.camStartX
-        val oy = ny - cv.camStartY
-        val off = hypot(ox, oy)
-        val outOfRoom = off > reach || nx < margin || nx > s.x - margin ||
-            ny < margin || ny > s.y - margin
-        if (outOfRoom) {
-            // Lift the game finger and put it back on the opposite side of the start point,
-            // which gives the movement direction 1.5x more room before the next reset.
-            val ux = if (off > 0f) ox / off else 0f
-            val uy = if (off > 0f) oy / off else 0f
-            val wx = (cv.camStartX - ux * reach * 0.5f).coerceIn(margin * 2, s.x - margin * 2)
-            val wy = (cv.camStartY - uy * reach * 0.5f).coerceIn(margin * 2, s.y - margin * 2)
-            touch().up(cv.camKey)
-            cv.camKey = Any()
-            cv.camPosX = wx
-            cv.camPosY = wy
-            touch().down(cv.camKey, wx, wy)
-        } else {
-            cv.camPosX = nx
-            cv.camPosY = ny
-            touch().move(cv.camKey, nx, ny)
+        // Which pad edges is the thumb pushing on? (−1 / 0 / +1 per axis, 1..2 = push strength)
+        val loc = IntArray(2)
+        cv.view.getLocationOnScreen(loc)
+        val zone = dp(14).toFloat()
+        val ramp = dp(60).toFloat()
+        val inEdge = thumbInEdgeZone(cv, m)
+        if (!inEdge) cv.edgeArmed = true // armed once the thumb has been inside the pad
+        var ex = 0f
+        var ey = 0f
+        if (cv.edgeArmed) {
+            val right = loc[0] + cv.view.width
+            val bottom = loc[1] + cv.view.height
+            if (m.rawX >= right - zone) ex = 1f + ((m.rawX - (right - zone)) / ramp).coerceIn(0f, 1f)
+            else if (m.rawX <= loc[0] + zone) ex = -(1f + (((loc[0] + zone) - m.rawX) / ramp).coerceIn(0f, 1f))
+            if (m.rawY >= bottom - zone) ey = 1f + ((m.rawY - (bottom - zone)) / ramp).coerceIn(0f, 1f)
+            else if (m.rawY <= loc[1] + zone) ey = -(1f + (((loc[1] + zone) - m.rawY) / ramp).coerceIn(0f, 1f))
         }
+        // On a pushed axis the continuous turn drives the camera; only a move back inwards counts.
+        if (ex != 0f && dxRaw * ex > 0f) dxRaw = 0f
+        if (ey != 0f && dyRaw * ey > 0f) dyRaw = 0f
+
+        val speed = gain * dp(260) // pixels per second at strength 1
+        cv.lookVx = ex * speed
+        cv.lookVy = ey * speed
+        if ((cv.lookVx != 0f || cv.lookVy != 0f) && !cv.lookTicking) {
+            cv.lookTicking = true
+            cv.lookLast = SystemClock.uptimeMillis()
+            handler.postDelayed(cv.lookTick, 8L)
+        }
+
+        if (dxRaw != 0f || dyRaw != 0f) {
+            applyLook(cv, cv.camPosX + dxRaw * gain, cv.camPosY + dyRaw * gain, m.eventTime)
+        }
+    }
+
+    private fun lookStep(cv: ControlView) {
+        if (!touch().isDown(cv.camKey) || (cv.lookVx == 0f && cv.lookVy == 0f)) {
+            cv.lookTicking = false
+            return
+        }
+        val now = SystemClock.uptimeMillis()
+        val dt = (now - cv.lookLast).coerceIn(1L, 50L) / 1000f
+        cv.lookLast = now
+        applyLook(cv, cv.camPosX + cv.lookVx * dt, cv.camPosY + cv.lookVy * dt, now)
+        handler.postDelayed(cv.lookTick, 8L)
     }
 
     private fun joystickMove(cv: ControlView, m: MotionEvent) {
@@ -1844,7 +2201,8 @@ class ClickerService : AccessibilityService() {
         touch().move(
             cv,
             (t[0] + dx * gain).coerceIn(0f, s.x.toFloat()),
-            (t[1] + dy * gain).coerceIn(0f, s.y.toFloat())
+            (t[1] + dy * gain).coerceIn(0f, s.y.toFloat()),
+            m.eventTime
         )
     }
 

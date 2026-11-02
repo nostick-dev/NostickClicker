@@ -1,4 +1,4 @@
-# NostickClicker 1.0.2
+# NostickClicker 1.0.3
 
 Native Android (Kotlin) auto-clicker and game-controls overlay. 100% offline.
 Created by **Nostick**. © 2026 Nostick — all rights reserved.

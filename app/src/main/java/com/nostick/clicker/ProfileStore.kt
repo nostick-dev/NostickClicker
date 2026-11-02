@@ -77,6 +77,7 @@ object ProfileStore {
         put("sensitivity", event.sensitivity.toDouble()); put("intervalMs", event.intervalMs)
         put("enabled", event.enabled)
         put("targetX", event.targetX.toDouble()); put("targetY", event.targetY.toDouble())
+        put("shape", event.shape); put("color", event.color); put("opacity", event.opacity.toDouble())
     }
 
     private fun fromJson(json: JSONObject): ControlProfile {
@@ -106,7 +107,10 @@ object ProfileStore {
                     intervalMs = item.optLong("intervalMs", 120L).coerceIn(40L, 10000L),
                     enabled = item.optBoolean("enabled", true),
                     targetX = item.optDouble("targetX", -1.0).toFloat(),
-                    targetY = item.optDouble("targetY", -1.0).toFloat()
+                    targetY = item.optDouble("targetY", -1.0).toFloat(),
+                    shape = item.optInt("shape", ControlShape.ROUNDED),
+                    color = item.optInt("color", DEFAULT_CONTROL_COLOR),
+                    opacity = item.optDouble("opacity", 0.8).toFloat().coerceIn(0.1f, 1f)
                 )
             )
         }

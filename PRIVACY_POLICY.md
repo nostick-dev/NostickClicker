@@ -16,6 +16,8 @@ Effective: 2026 · Owner: Nostick
 - **Local settings.** Click speed and your control layouts are stored only on your
   device and are deleted when you uninstall the app.
 - **Optional Shizuku mode.** If you enable it, touches are sent to Android through
-  the Shizuku app on your device. Nothing leaves your device.
+  the Shizuku app on your device. To deliver them to the game only, the app notes the
+  *name* of the app that is in the foreground (never its content) and keeps it in memory
+  only. Nothing leaves your device.
 
 Contact: [ضع هنا وسيلة التواصل]
